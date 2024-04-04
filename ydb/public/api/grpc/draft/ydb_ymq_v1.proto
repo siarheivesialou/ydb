@@ -1,0 +1,14 @@
+syntax = "proto3";
+option cc_enable_arenas = true;
+
+package Ydb.YMQ.V1;
+
+import "ydb/public/api/protos/draft/ymq.proto";
+
+
+option java_package = "com.yandex.ydb.ymq.v1";
+
+
+service YmqService {
+    rpc GetQueueUrl(GetQueueUrlRequest) returns (GetQueueUrlResponse);
+}
