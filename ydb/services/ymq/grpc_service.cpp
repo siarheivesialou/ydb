@@ -1,6 +1,5 @@
 #include "grpc_service.h"
 
-#include <ydb/core/grpc_services/service_datastreams.h>
 #include <ydb/core/base/counters.h>
 #include <ydb/core/base/appdata.h>
 #include <ydb/core/base/ticket_parser.h>
@@ -37,7 +36,7 @@ void YdsProcessAttr(const TSchemeBoardEvents::TDescribeSchemeResult& schemeData,
 
 namespace NKikimr::NGRpcService {
 
-void TGRpcDataStreamsService::SetupIncomingRequests(NYdbGrpc::TLoggerPtr logger)
+void TGRpcYmqService::SetupIncomingRequests(NYdbGrpc::TLoggerPtr logger)
 {
     auto getCounterBlock = CreateCounterCb(Counters_, ActorSystem_);
     using std::placeholders::_1;
@@ -46,48 +45,19 @@ void TGRpcDataStreamsService::SetupIncomingRequests(NYdbGrpc::TLoggerPtr logger)
 #ifdef ADD_REQUEST
 #error ADD_REQUEST macro already defined
 #endif
+//TODO: убрать дублирование с DataStreams
 #define ADD_REQUEST(NAME, CB, ATTR, LIMIT_TYPE) \
-    MakeIntrusive<TGRpcRequest<Ydb::DataStreams::V1::NAME##Request, Ydb::DataStreams::V1::NAME##Response, TGRpcDataStreamsService>> \
+    MakeIntrusive<TGRpcRequest<Ydb::YMQ::NAME##Request, Ydb::YMQ::NAME##Response, TGRpcYmqService>> \
         (this, &Service_, CQ_,                                                                                                      \
             [this](NYdbGrpc::IRequestContextBase *ctx) {                                                                               \
                 NGRpcService::ReportGrpcReqToMon(*ActorSystem_, ctx->GetPeer());                                                    \
                 ActorSystem_->Send(GRpcRequestProxyId_,                                                                             \
-                    new TGrpcRequestOperationCall<Ydb::DataStreams::V1::NAME##Request, Ydb::DataStreams::V1::NAME##Response>        \
+                    new TGrpcRequestOperationCall<Ydb::YMQ::NAME##Request, Ydb::YMQ::NAME##Response>        \
                         (ctx, CB, TRequestAuxSettings{RLSWITCH(TRateLimiterMode::LIMIT_TYPE), ATTR}));                              \
-            }, &Ydb::DataStreams::V1::DataStreamsService::AsyncService::Request ## NAME,                                            \
+            }, &Ydb::YMQ::V1::YmqService::AsyncService::Request ## NAME,                                            \
             #NAME, logger, getCounterBlock("data_streams", #NAME))->Run();
 
-    ADD_REQUEST(DescribeStream, DoDataStreamsDescribeStreamRequest, nullptr, Off)
-    ADD_REQUEST(CreateStream, DoDataStreamsCreateStreamRequest, nullptr, Off)
-    ADD_REQUEST(ListStreams, DoDataStreamsListStreamsRequest, nullptr, Off)
-    ADD_REQUEST(DeleteStream, DoDataStreamsDeleteStreamRequest, nullptr, Off)
-    ADD_REQUEST(ListShards, DoDataStreamsListShardsRequest, nullptr, Off)
-    ADD_REQUEST(PutRecord, DoDataStreamsPutRecordRequest, YdsProcessAttr, RuManual)
-    ADD_REQUEST(PutRecords, DoDataStreamsPutRecordsRequest, YdsProcessAttr, RuManual)
-    ADD_REQUEST(GetRecords, DoDataStreamsGetRecordsRequest, nullptr, RuManual)
-    ADD_REQUEST(GetShardIterator, DoDataStreamsGetShardIteratorRequest, nullptr, Off)
-    ADD_REQUEST(SubscribeToShard, DoDataStreamsSubscribeToShardRequest, nullptr, Off)
-    ADD_REQUEST(DescribeLimits, DoDataStreamsDescribeLimitsRequest, nullptr, Off)
-    ADD_REQUEST(DescribeStreamSummary, DoDataStreamsDescribeStreamSummaryRequest, nullptr, Off)
-    ADD_REQUEST(DecreaseStreamRetentionPeriod, DoDataStreamsDecreaseStreamRetentionPeriodRequest, nullptr, Off)
-    ADD_REQUEST(IncreaseStreamRetentionPeriod, DoDataStreamsIncreaseStreamRetentionPeriodRequest, nullptr, Off)
-    ADD_REQUEST(UpdateShardCount, DoDataStreamsUpdateShardCountRequest, nullptr, Off)
-    ADD_REQUEST(UpdateStreamMode, DoDataStreamsUpdateStreamModeRequest, nullptr, Off)
-    ADD_REQUEST(RegisterStreamConsumer, DoDataStreamsRegisterStreamConsumerRequest, nullptr, Off)
-    ADD_REQUEST(DeregisterStreamConsumer, DoDataStreamsDeregisterStreamConsumerRequest, nullptr, Off)
-    ADD_REQUEST(DescribeStreamConsumer, DoDataStreamsDescribeStreamConsumerRequest, nullptr, Off)
-    ADD_REQUEST(ListStreamConsumers, DoDataStreamsListStreamConsumersRequest, nullptr, Off)
-    ADD_REQUEST(AddTagsToStream, DoDataStreamsAddTagsToStreamRequest, nullptr, Off)
-    ADD_REQUEST(DisableEnhancedMonitoring, DoDataStreamsDisableEnhancedMonitoringRequest, nullptr, Off)
-    ADD_REQUEST(EnableEnhancedMonitoring, DoDataStreamsEnableEnhancedMonitoringRequest, nullptr, Off)
-    ADD_REQUEST(ListTagsForStream, DoDataStreamsListTagsForStreamRequest, nullptr, Off)
-    ADD_REQUEST(MergeShards, DoDataStreamsMergeShardsRequest, nullptr, Off)
-    ADD_REQUEST(RemoveTagsFromStream, DoDataStreamsRemoveTagsFromStreamRequest, nullptr, Off)
-    ADD_REQUEST(SplitShard, DoDataStreamsSplitShardRequest, nullptr, Off)
-    ADD_REQUEST(StartStreamEncryption, DoDataStreamsStartStreamEncryptionRequest, nullptr, Off)
-    ADD_REQUEST(StopStreamEncryption, DoDataStreamsStopStreamEncryptionRequest, nullptr, Off)
-    ADD_REQUEST(UpdateStream, DoDataStreamsUpdateStreamRequest, nullptr, Off)
-    ADD_REQUEST(SetWriteQuota, DoDataStreamsSetWriteQuotaRequest, nullptr, Off)
+    ADD_REQUEST(GetQueueUrl, Do, nullptr, Off)
 
 #undef ADD_REQUEST
 }

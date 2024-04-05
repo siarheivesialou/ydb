@@ -5,8 +5,8 @@ import "ydb/public/api/protos/draft/field_transformation.proto";
 
 import "google/protobuf/descriptor.proto";
 
-package Ydb.YMQ;
-option java_package = "com.yandex.ydb.ymq";
+package Ydb.Ymq.V1;
+option java_package = "com.yandex.ydb.ymq.v1";
 
 message ChangeMessageVisibilityRequest {
     Ydb.Operations.OperationParams operation_params = 1;

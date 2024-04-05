@@ -168,7 +168,7 @@ Y_UNIT_TEST(NlohmannJsonToProtoArray) {
 
 Y_UNIT_TEST(JsonToProtoMap) {
   {
-    Ydb::YMQ::CreateQueueRequest message;
+    Ydb::Ymq::V1::CreateQueueRequest message;
 
     NJson::TJsonValue jsonObject;
     jsonObject["QueueName"] = "SampleQueueName";
@@ -189,7 +189,7 @@ Y_UNIT_TEST(JsonToProtoMap) {
 
 Y_UNIT_TEST(ProtoMapToJson) {
   {
-    Ydb::YMQ::GetQueueAttributesResult message;
+    Ydb::Ymq::V1::GetQueueAttributesResult message;
     message.mutable_attributes()->insert({google::protobuf::MapPair<TString, TString>("DelaySeconds", "900")});
     message.mutable_attributes()->insert({google::protobuf::MapPair<TString, TString>("MaximumMessageSize", "1024")});
 
@@ -213,7 +213,7 @@ Y_UNIT_TEST(NlohmannJsonToProtoMap) {
     jsonObject["Attributes"] = attributes;
     nlohmann::json record;
 
-    Ydb::YMQ::CreateQueueRequest message;
+    Ydb::Ymq::V1::CreateQueueRequest message;
     NKikimr::NHttpProxy::NlohmannJsonToProto(jsonObject, &message);
 
     UNIT_ASSERT_VALUES_EQUAL(message.queue_name(), "SampleQueueName");
