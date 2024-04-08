@@ -7,10 +7,10 @@
 
 namespace NKikimr::NGRpcService {
 
-    class TGRpcYmqService : public TGrpcServiceBase<Ydb::YMQ::V1::YmqService>
+    class TGRpcYmqService : public TGrpcServiceBase<Ydb::Ymq::V1::YmqService>
     {
     public:
-        using TGrpcServiceBase<Ydb::YMQ::V1::YmqService>::TGrpcServiceBase;
+        using TGrpcServiceBase<Ydb::Ymq::V1::YmqService>::TGrpcServiceBase;
     private:
         void SetupIncomingRequests(NYdbGrpc::TLoggerPtr logger);
     };

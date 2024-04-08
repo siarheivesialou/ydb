@@ -1,5 +1,6 @@
 #include "grpc_service.h"
 
+#include <ydb/core/grpc_services/service_ymq.h>
 #include <ydb/core/base/counters.h>
 #include <ydb/core/base/appdata.h>
 #include <ydb/core/base/ticket_parser.h>
@@ -47,17 +48,17 @@ void TGRpcYmqService::SetupIncomingRequests(NYdbGrpc::TLoggerPtr logger)
 #endif
 //TODO: убрать дублирование с DataStreams
 #define ADD_REQUEST(NAME, CB, ATTR, LIMIT_TYPE) \
-    MakeIntrusive<TGRpcRequest<Ydb::YMQ::NAME##Request, Ydb::YMQ::NAME##Response, TGRpcYmqService>> \
+    MakeIntrusive<TGRpcRequest<Ydb::Ymq::V1::NAME##Request, Ydb::Ymq::V1::NAME##Response, TGRpcYmqService>> \
         (this, &Service_, CQ_,                                                                                                      \
             [this](NYdbGrpc::IRequestContextBase *ctx) {                                                                               \
                 NGRpcService::ReportGrpcReqToMon(*ActorSystem_, ctx->GetPeer());                                                    \
                 ActorSystem_->Send(GRpcRequestProxyId_,                                                                             \
-                    new TGrpcRequestOperationCall<Ydb::YMQ::NAME##Request, Ydb::YMQ::NAME##Response>        \
+                    new TGrpcRequestOperationCall<Ydb::Ymq::V1::NAME##Request, Ydb::Ymq::V1::NAME##Response>        \
                         (ctx, CB, TRequestAuxSettings{RLSWITCH(TRateLimiterMode::LIMIT_TYPE), ATTR}));                              \
-            }, &Ydb::YMQ::V1::YmqService::AsyncService::Request ## NAME,                                            \
+            }, &Ydb::Ymq::V1::YmqService::AsyncService::Request ## NAME,                                            \
             #NAME, logger, getCounterBlock("data_streams", #NAME))->Run();
 
-    ADD_REQUEST(GetQueueUrl, Do, nullptr, Off)
+    ADD_REQUEST(GetQueueUrl, DoYmqGetQueueUrlRequest, nullptr, Off)
 
 #undef ADD_REQUEST
 }

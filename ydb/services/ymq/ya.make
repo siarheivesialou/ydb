@@ -1,7 +1,7 @@
 LIBRARY()
 
 SRCS(
-    # ymq_proxy.cpp
+    ymq_proxy.cpp
     grpc_service.cpp
 )
 
