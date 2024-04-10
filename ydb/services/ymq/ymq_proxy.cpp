@@ -40,8 +40,8 @@ namespace NKikimr::NYmq::V1 {
         }
     }
 
-    class TGetQueueUrlActor : public TActorBootstrapped<TGetQueueUrlActor> {
-        using TBase = TActorBootstrapped<TGetQueueUrlActor>;
+    class TGetQueueUrlActor : public TRpcRequestWithOperationParamsActor<TGetQueueUrlActor, TEvYmqGetQueueUrlRequest, true> {
+        using TBase = TRpcRequestWithOperationParamsActor<TGetQueueUrlActor, TEvYmqGetQueueUrlRequest, true>;
 
     public:
         TGetQueueUrlActor(NKikimr::NGRpcService::IRequestOpCtx* request);
@@ -51,12 +51,13 @@ namespace NKikimr::NYmq::V1 {
     };
 
     TGetQueueUrlActor::TGetQueueUrlActor(NKikimr::NGRpcService::IRequestOpCtx* request)
-        : TBase()
+        : TBase(request)
     {
         Y_UNUSED(request);
     }
 
     void TGetQueueUrlActor::Bootstrap(const NActors::TActorContext& ctx) {
-        Y_UNUSED(ctx);
+        this->Request_->ReplyWithYdbStatus(Ydb::StatusIds::UNSUPPORTED);
+        this->Die(ctx);
     }
 }
