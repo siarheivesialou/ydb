@@ -57,6 +57,15 @@ namespace NKikimr::NYmq::V1 {
     }
 
     void TGetQueueUrlActor::Bootstrap(const NActors::TActorContext& ctx) {
+        auto requestHolder = MakeHolder<TSqsRequest>();
+        //TODO: где взять request id?
+        requestHolder->SetRequestId("foobar");
+//           SetupDeleteQueue(requestHolder->MutableDeleteQueue());
+//   CopyCredentials(requestHolder->MutableDeleteQueue(), Parent_->Config);
+        requestHolder->MutableGetQueueUrl()->SetQueueName(GetProtoRequest()->queue_name());
+        requestHolder->MutableGetQueueUrl()->MutableAuth()->SetUserName(GetProtoRequest()->);
+        // requestHolder->getRSetQueueName(QueueName_);
+        // requestHolder->MutableAuth()->SetUserName(UserName_);
         this->Request_->ReplyWithYdbStatus(Ydb::StatusIds::SUCCESS);
         this->Die(ctx);
     }
