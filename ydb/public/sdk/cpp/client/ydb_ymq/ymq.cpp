@@ -9,7 +9,7 @@
 
 #include <ydb/public/sdk/cpp/client/ydb_common_client/impl/client.h>
 
-namespace NYdb::NDataStreams::V1 {
+namespace NYdb::Ymq::V1 {
 
     class TYmqClient::TImpl : public TClientImplCommon<TYmqClient::TImpl> {
     public:
@@ -82,6 +82,15 @@ namespace NYdb::NDataStreams::V1 {
                });
         }
     };
+
+    TYmqClient::TYmqClient(const TDriver& driver, const TCommonClientSettings& settings)
+            : Impl_(new TImpl(CreateInternalInterface(driver), settings))
+    {
+    }
+
+    TAsyncGetQueueUrlResult TYmqClient::GetQueueUrl(const TString& path, TGetQueueUrlSettings& settings) {
+        return Impl_->GetQueueUrl(path, settings);
+    }
 
     template<class TProtoRequest, class TProtoResponse, class TProtoResult, class TMethod>
     NThreading::TFuture<TProtoResultWrapper<TProtoResult>> TYmqClient::DoProtoRequest(const TProtoRequest& request, TMethod method, TProtoRequestSettings settings) {

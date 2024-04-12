@@ -57,7 +57,29 @@ namespace NKikimr::NYmq::V1 {
     }
 
     void TGetQueueUrlActor::Bootstrap(const NActors::TActorContext& ctx) {
-        this->Request_->ReplyWithYdbStatus(Ydb::StatusIds::UNSUPPORTED);
+        this->Request_->ReplyWithYdbStatus(Ydb::StatusIds::SUCCESS);
         this->Die(ctx);
     }
+}
+
+namespace NKikimr::NGRpcService {
+
+using namespace NYmq::V1;
+
+#define DECLARE_RPC(name) template<> IActor* TEvYmq##name##Request::CreateRpcActor(NKikimr::NGRpcService::IRequestOpCtx* msg) { \
+    return new T##name##Actor(msg);\
+}\
+void DoYmq##name##Request(std::unique_ptr<IRequestOpCtx> p, const IFacilityProvider&) {\
+    TActivationContext::AsActorContext().Register(new T##name##Actor(p.release())); \
+}
+
+#define DECLARE_RPC_NI(name) template<> IActor* TEvYmq##name##Request::CreateRpcActor(NKikimr::NGRpcService::IRequestOpCtx* msg) { \
+    return new TNotImplementedRequestActor<NKikimr::NGRpcService::TEvYmq##name##Request>(msg);\
+}\
+void DoDataStreams##name##Request(std::unique_ptr<IRequestOpCtx> p, const IFacilityProvider&) {\
+    TActivationContext::AsActorContext().Register(new TNotImplementedRequestActor<NKikimr::NGRpcService::TEvYmq##name##Request>(p.release()));\
+}
+
+DECLARE_RPC(GetQueueUrl);
+
 }

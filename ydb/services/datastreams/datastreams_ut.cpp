@@ -37,9 +37,9 @@ static constexpr const char DEFAULT_CLOUD_ID[] = "somecloud";
 static constexpr const char DEFAULT_FOLDER_ID[] = "somefolder";
 
 template<class TKikimr, bool secure>
-class TDatastreamsTestServer {
+class TYmqTestServer {
 public:
-    TDatastreamsTestServer() {
+    TYmqTestServer() {
         NKikimrConfig::TAppConfig appConfig;
         appConfig.MutablePQConfig()->SetTopicsAreFirstClassCitizen(true);
         appConfig.MutablePQConfig()->SetEnabled(true);
@@ -126,8 +126,8 @@ public:
     THolder<TTempFileHandle> MeteringFile;
 };
 
-using TInsecureDatastreamsTestServer = TDatastreamsTestServer<TKikimrWithGrpcAndRootSchema, false>;
-using TSecureDatastreamsTestServer = TDatastreamsTestServer<TKikimrWithGrpcAndRootSchemaSecure, true>;
+using TInsecureDatastreamsTestServer = TYmqTestServer<TKikimrWithGrpcAndRootSchema, false>;
+using TSecureDatastreamsTestServer = TYmqTestServer<TKikimrWithGrpcAndRootSchemaSecure, true>;
 
 ui32 CheckMeteringFile(TTempFileHandle* meteringFile, const TString& streamPath, const TString& schema,
                        std::function<void(const NJson::TJsonValue::TMapType& map)> tags_check,
