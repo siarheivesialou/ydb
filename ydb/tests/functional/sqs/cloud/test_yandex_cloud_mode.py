@@ -127,6 +127,7 @@ class TestSqsYandexCloudMode(get_test_with_sqs_tenant_installation(KikimrSqsTest
 
         # basic sanity check
         queue_url = boto_client.create_queue(QueueName=self.queue_name)['QueueUrl']
+        logging.info('KLACK: queue_url: ' + str(queue_url))
         assert_that(boto_client.list_queues()['QueueUrls'], has_item(queue_url))
         boto_client.send_message(QueueUrl=queue_url, MessageBody='awesome')
 

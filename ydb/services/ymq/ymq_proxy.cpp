@@ -57,18 +57,31 @@ namespace NKikimr::NYmq::V1 {
     }
 
     void TGetQueueUrlActor::Bootstrap(const NActors::TActorContext& ctx) {
-        auto requestHolder = MakeHolder<TSqsRequest>();
-        //TODO: где взять request id?
-        requestHolder->SetRequestId("foobar");
-//           SetupDeleteQueue(requestHolder->MutableDeleteQueue());
-//   CopyCredentials(requestHolder->MutableDeleteQueue(), Parent_->Config);
-        requestHolder->MutableGetQueueUrl()->SetQueueName(GetProtoRequest()->queue_name());
-        requestHolder->MutableGetQueueUrl()->MutableAuth()->SetUserName(GetProtoRequest()->);
-        // requestHolder->getRSetQueueName(QueueName_);
-        // requestHolder->MutableAuth()->SetUserName(UserName_);
-        this->Request_->ReplyWithYdbStatus(Ydb::StatusIds::SUCCESS);
-        this->Die(ctx);
-    }
+        // auto requestHolder = MakeHolder<TSqsRequest>();
+        // requestHolder->SetRequestId(); // добавить в прото?
+        // requestHolder->MutableGetQueueUrl()->SetQueueName(GetProtoRequest()->queue_name());
+        // requestHolder->MutableGetQueueUrl()->MutableAuth()->SetUserName(GetProtoRequest()->); // добавить в прото?
+        // this->Request_->ReplyWithYdbStatus(Ydb::StatusIds::SUCCESS);
+
+        // TAuthActorData data {
+        //     .SQSRequest = std::move(requestHolder),
+        //     .HTTPCallback = std::move(httpCallback),
+        //     .UserSidCallback = [this](const TString& userSid) { UserSid_ = userSid; },
+        //     .EnableQueueLeader = enableQueueLeader,
+        //     .Action = Action_,
+        //     .ExecutorPoolID = Parent_->PoolId_,
+        //     .CloudID = AccountName_, // добавить в прото?
+        //     .ResourceID = QueueName_, // знаем (в случае других action - извлекать из queueUrl)
+        //     .Counters = Parent_->CloudAuthCounters_.Get(),
+        //     .AWSSignature = std::move(AwsSignature_),
+        //     .IAMToken = IamToken_, // добавить в прото?
+        //     .FolderID = FolderId_ // добавить в прото?
+        // };
+
+        // AppData(Parent_->ActorSystem_)->SqsAuthFactory->RegisterAuthActor(
+        //     *Parent_->ActorSystem_,
+        //     std::move(data));
+        // }
 }
 
 namespace NKikimr::NGRpcService {

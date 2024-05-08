@@ -73,7 +73,7 @@ namespace NKikimr::NHttpProxy {
         ev->Secure = config.GetSecure();
         ev->CertificateFile = config.GetCert();
         ev->PrivateKeyFile = config.GetKey();
-
+ // Где взять?
         ctx.Send(new NActors::IEventHandle(MakeHttpServerServiceID(), TActorId(),
                                            ev.Release(), 0, true));
         ctx.Send(MakeHttpServerServiceID(),
