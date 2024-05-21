@@ -55,6 +55,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <ydb/library/folder_service/folder_service.h>
+#include <ydb/library/folder_service/events.h>
 
 namespace NKikimr::NHttpProxy {
 
@@ -537,6 +539,15 @@ namespace NKikimr::NHttpProxy {
                 return ReplyWithError(ctx, NYdb::EStatus::TIMEOUT, "Request hasn't been completed by deadline");
             }
 
+            bool IsSqsRequest() {
+                //TODO: пока что это заглушка, потому нужно будет проверять, что за хидер в запросе
+                return true;
+            }
+
+            void ProcessSqsRequest() {
+                
+            }
+
         public:
             void Bootstrap(const TActorContext& ctx) {
                 StartTime = ctx.Now();
@@ -554,6 +565,10 @@ namespace NKikimr::NHttpProxy {
                                   "got new request with incorrect json from [" << HttpContext.SourceAddress << "] " <<
                                   "database '" << HttpContext.DatabasePath << "'");
                     return ReplyWithError(ctx, NYdb::EStatus::BAD_REQUEST, e.what(), static_cast<size_t>(NYds::EErrorCodes::INVALID_ARGUMENT));
+                }
+
+                if (IsSqsRequest()) {
+                    
                 }
 
                 if (HttpContext.DatabasePath.empty()) {
@@ -902,6 +917,131 @@ namespace NKikimr::NHttpProxy {
         }
     }
 
+    class TSQSTicketExchanger: public NActors::TActorBootstrapped<TSQSTicketExchanger> {
+    public:
+        using TBase = NActors::TActorBootstrapped<TSQSTicketExchanger>;
+        TSQSTicketExchanger(
+                const TActorId sender,
+                THttpRequestContext& context,
+                THolder<NKikimr::NSQS::TAwsRequestSignV4>&& signature)
+            : Sender(sender)
+            , Prefix(context.LogPrefix())
+            , ServiceAccountId(context.ServiceAccountId)
+            , ServiceAccountCredentialsProvider(context.ServiceAccountCredentialsProvider)
+            , RequestId(context.RequestId)
+            , Signature(std::move(signature))
+            , ServiceConfig(context.ServiceConfig)
+            , IamToken(context.IamToken)
+            , Authorize(!context.Driver)
+            , DatabasePath(context.DatabasePath)
+            , StreamName(context.StreamName)
+        {
+        }
+
+        void Bootstrap(const TActorContext& ctx) {
+            TBase::Become(&TSQSTicketExchanger::StateWork);
+
+            THolder<TEvTicketParser::TEvAuthorizeTicket> request;
+
+            if (Signature.Get()) {
+                TInstant signedAt;
+
+                TEvTicketParser::TEvAuthorizeTicket::TAccessKeySignature signature;
+                signature.AccessKeyId = Signature->GetAccessKeyId();
+                signature.StringToSign = Signature->GetStringToSign();
+                signature.Signature = Signature->GetParsedSignature();
+                signature.Service = "kinesis";
+                signature.Region = Signature->GetRegion();
+                signature.SignedAt = signedAt;
+
+                request = MakeHolder<TEvTicketParser::TEvAuthorizeTicket>(std::move(signature), "");
+            } else {
+                request = MakeHolder<TEvTicketParser::TEvAuthorizeTicket>(IamToken, "");
+            }
+
+            ctx.Send(MakeTicketParserID(), request.Release());
+        }
+    
+        const TActorId Sender;
+        const TString Prefix;
+        TString ServiceAccountId;
+        std::shared_ptr<NYdb::ICredentialsProvider> ServiceAccountCredentialsProvider;
+        const TString RequestId;
+        THolder<NKikimr::NSQS::TAwsRequestSignV4> Signature;
+        TRetryCounter RetryCounter;
+        const NKikimrConfig::TServerlessProxyConfig& ServiceConfig;
+        TString IamToken;
+        bool Authorize;
+        TString FolderId;
+        TString CloudId;
+        TString DatabaseId;
+        TString DatabasePath;
+        TString StreamName;
+
+    private:
+        STFUNC(StateWork)
+        {
+            switch (ev->GetTypeRewrite()) {
+                HFunc(TEvTicketParser::TEvAuthorizeTicketResult, HandleTicketParser);
+                HFunc(TEvents::TEvPoisonPill, HandlePoison);
+                default:
+                    HandleUnexpectedEvent(ev);
+                    break;
+                }
+        }
+
+        void HandlePoison(const TEvents::TEvPoisonPill::TPtr&, const TActorContext& ctx) {
+            TBase::Die(ctx);
+        }
+
+        void HandleTicketParser(const TEvTicketParser::TEvAuthorizeTicketResult::TPtr& ev, const TActorContext& ctx) {
+
+            if (ev->Get()->Error) {
+                return ReplyWithError(ctx, ev->Get()->Error.Retryable ? NYdb::EStatus::UNAVAILABLE : NYdb::EStatus::UNAUTHORIZED, ev->Get()->Error.Message);
+            }
+            ctx.Send(Sender, new TEvServerlessProxy::TEvToken(ev->Get()->Token->GetUserSID(), "", ev->Get()->SerializedToken, {"", DatabaseId, DatabasePath, CloudId, FolderId}));
+
+            LOG_SP_DEBUG_S(ctx, NKikimrServices::HTTP_PROXY, "Authorized successfully");
+
+            TBase::Die(ctx);
+        }
+
+        void RequestFolderService(TString& folderId) {
+            auto request = MakeHolder<NKikimr::NFolderService::TEvFolderService::TEvGetCloudByFolderRequest>();
+            auto infraToken = ServiceAccountCredentialsProvider->GetAuthInfo();
+            request.Get()->FolderId = folderId;
+            request.Get()->RequestId = RequestId;
+            request.Get()->Token = infraToken;
+
+            Send(NKikimr::NFolderService::FolderServiceActorId(), std::move(request));
+        }
+
+        void HandleUnexpectedEvent(const TAutoPtr<NActors::IEventHandle>& ev) {
+            Y_UNUSED(ev);
+        }
+
+        void ReplyWithError(
+                const TActorContext& ctx,
+                NYdb::EStatus status,
+                const TString& errorText,
+                NYds::EErrorCodes issueCode = NYds::EErrorCodes::GENERIC_ERROR
+        ) {
+            ctx.Send(
+                Sender,
+                new TEvServerlessProxy::TEvErrorWithIssue(
+                    status,
+                    errorText,
+                    {"", DatabaseId, DatabasePath, CloudId, FolderId},
+                    static_cast<size_t>(issueCode)
+                    )
+                );
+            TBase::Die(ctx);
+        }
+        TStringBuilder LogPrefix() const {
+            return TStringBuilder() << Prefix << " [sqs-ticket-exchanger] ";
+        }
+    };
+
     class THttpAuthActor : public NActors::TActorBootstrapped<THttpAuthActor> {
     public:
         using TBase = NActors::TActorBootstrapped<THttpAuthActor>;
@@ -1034,6 +1174,7 @@ namespace NKikimr::NHttpProxy {
             if (Authorize) {
                 auto entries = NKikimr::NGRpcProxy::V1::GetTicketParserEntries(DatabaseId, FolderId);
                 if (Signature.Get()) {
+                    TInstant signedAt;
                     TEvTicketParser::TEvAuthorizeTicket::TAccessKeySignature signature;
                     signature.AccessKeyId = Signature->GetAccessKeyId();
                     signature.StringToSign = Signature->GetStringToSign();
