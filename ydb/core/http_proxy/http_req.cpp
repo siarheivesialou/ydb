@@ -973,7 +973,8 @@ namespace NKikimr::NHttpProxy {
                 signature.Region = Signature->GetRegion();
                 signature.SignedAt = signedAt;
 
-                request = MakeHolder<TEvTicketParser::TEvAuthorizeTicket>(std::move(signature), "");
+                TVector<TEvTicketParser::TEvAuthorizeTicket::TEntry> entries;
+                request = MakeHolder<TEvTicketParser::TEvAuthorizeTicket>(std::move(signature), "", entries);
             } else {
                 request = MakeHolder<TEvTicketParser::TEvAuthorizeTicket>(IamToken, "");
             }

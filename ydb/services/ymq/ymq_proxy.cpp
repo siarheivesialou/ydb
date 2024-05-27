@@ -57,6 +57,7 @@ namespace NKikimr::NYmq::V1 {
     }
 
     void TGetQueueUrlActor::Bootstrap(const NActors::TActorContext& ctx) {
+        Y_UNUSED(ctx);
         // auto requestHolder = MakeHolder<TSqsRequest>();
         // requestHolder->SetRequestId(); // добавить в прото?
         // requestHolder->MutableGetQueueUrl()->SetQueueName(GetProtoRequest()->queue_name());
@@ -82,6 +83,7 @@ namespace NKikimr::NYmq::V1 {
         //     *Parent_->ActorSystem_,
         //     std::move(data));
         // }
+    }
 }
 
 namespace NKikimr::NGRpcService {

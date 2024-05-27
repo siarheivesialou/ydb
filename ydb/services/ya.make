@@ -1,32 +1,23 @@
-LIBRARY()
-
-SRCS(
-    _proxy.cpp
-    grpc_service.cpp
-    next_token.cpp
-    put_records_actor.cpp
-    shard_iterator.cpp
-)
-
-PEERDIR(
-    ydb/library/grpc/server
-    ydb/core/base
-    ydb/core/client/server
-    ydb/core/grpc_services
-    ydb/core/mind
-    ydb/public/api/grpc
-    ydb/public/api/grpc/draft
-    ydb/public/lib/operation_id
-    ydb/public/sdk/cpp/client/resources
-    ydb/public/sdk/cpp/client/ydb_ymq
-    ydb/services/lib/actors
-    ydb/services/lib/sharding
-    ydb/services/persqueue_v1
-    ydb/services/ydb
-)
-
-END()
-
-RECURSE_FOR_TESTS(
-    ut
+RECURSE(
+    auth
+    bg_tasks
+    cms
+    datastreams
+    deprecated/persqueue_v0
+    discovery
+    dynamic_config
+    ext_index
+    fq
+    kesus
+    keyvalue
+    lib
+    local_discovery
+    maintenance
+    metadata
+    monitoring
+    persqueue_cluster_discovery
+    persqueue_v1
+    rate_limiter
+    ydb
+    ymq
 )

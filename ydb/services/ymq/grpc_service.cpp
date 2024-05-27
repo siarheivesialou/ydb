@@ -8,11 +8,6 @@
 #include <ydb/core/grpc_services/base/base.h>
 #include <ydb/core/tx/scheme_board/cache.h>
 
-namespace {
-
-using namespace NKikimr;
-
-}
 
 namespace NKikimr::NGRpcService {
 
