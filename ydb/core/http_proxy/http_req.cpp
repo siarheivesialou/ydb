@@ -45,6 +45,8 @@
 #include <ydb/services/datastreams/shard_iterator.h>
 #include <ydb/services/lib/sharding/sharding.h>
 
+#include <ydb/services/ymq/ymq_proxy.h>
+
 
 #include <util/generic/guid.h>
 #include <util/stream/file.h>
@@ -634,45 +636,61 @@ namespace NKikimr::NHttpProxy {
 
 
     void THttpRequestProcessors::Initialize() {
-        #define DECLARE_PROCESSOR(name) Name2Processor[#name] = MakeHolder<THttpRequestProcessor<DataStreamsService, name##Request, name##Response, name##Result,\
+        #define DECLARE_DATASTREAMS_PROCESSOR(name) Name2DataStreamsProcessor[#name] = MakeHolder<THttpRequestProcessor<DataStreamsService, name##Request, name##Response, name##Result,\
                     decltype(&Ydb::DataStreams::V1::DataStreamsService::Stub::Async##name), NKikimr::NGRpcService::TEvDataStreams##name##Request>> \
                     (#name, &Ydb::DataStreams::V1::DataStreamsService::Stub::Async##name);
-        DECLARE_PROCESSOR(PutRecords);
-        DECLARE_PROCESSOR(CreateStream);
-        DECLARE_PROCESSOR(ListStreams);
-        DECLARE_PROCESSOR(DeleteStream);
-        DECLARE_PROCESSOR(UpdateStream);
-        DECLARE_PROCESSOR(DescribeStream);
-        DECLARE_PROCESSOR(ListShards);
-        DECLARE_PROCESSOR(PutRecord);
-        DECLARE_PROCESSOR(GetRecords);
-        DECLARE_PROCESSOR(GetShardIterator);
-        DECLARE_PROCESSOR(DescribeLimits);
-        DECLARE_PROCESSOR(DescribeStreamSummary);
-        DECLARE_PROCESSOR(DecreaseStreamRetentionPeriod);
-        DECLARE_PROCESSOR(IncreaseStreamRetentionPeriod);
-        DECLARE_PROCESSOR(UpdateShardCount);
-        DECLARE_PROCESSOR(UpdateStreamMode);
-        DECLARE_PROCESSOR(RegisterStreamConsumer);
-        DECLARE_PROCESSOR(DeregisterStreamConsumer);
-        DECLARE_PROCESSOR(DescribeStreamConsumer);
-        DECLARE_PROCESSOR(ListStreamConsumers);
-        DECLARE_PROCESSOR(AddTagsToStream);
-        DECLARE_PROCESSOR(DisableEnhancedMonitoring);
-        DECLARE_PROCESSOR(EnableEnhancedMonitoring);
-        DECLARE_PROCESSOR(ListTagsForStream);
-        DECLARE_PROCESSOR(MergeShards);
-        DECLARE_PROCESSOR(RemoveTagsFromStream);
-        DECLARE_PROCESSOR(SplitShard);
-        DECLARE_PROCESSOR(StartStreamEncryption);
-        DECLARE_PROCESSOR(StopStreamEncryption);
+
+        DECLARE_DATASTREAMS_PROCESSOR(PutRecords);
+        DECLARE_DATASTREAMS_PROCESSOR(CreateStream);
+        DECLARE_DATASTREAMS_PROCESSOR(ListStreams);
+        DECLARE_DATASTREAMS_PROCESSOR(DeleteStream);
+        DECLARE_DATASTREAMS_PROCESSOR(UpdateStream);
+        DECLARE_DATASTREAMS_PROCESSOR(DescribeStream);
+        DECLARE_DATASTREAMS_PROCESSOR(ListShards);
+        DECLARE_DATASTREAMS_PROCESSOR(PutRecord);
+        DECLARE_DATASTREAMS_PROCESSOR(GetRecords);
+        DECLARE_DATASTREAMS_PROCESSOR(GetShardIterator);
+        DECLARE_DATASTREAMS_PROCESSOR(DescribeLimits);
+        DECLARE_DATASTREAMS_PROCESSOR(DescribeStreamSummary);
+        DECLARE_DATASTREAMS_PROCESSOR(DecreaseStreamRetentionPeriod);
+        DECLARE_DATASTREAMS_PROCESSOR(IncreaseStreamRetentionPeriod);
+        DECLARE_DATASTREAMS_PROCESSOR(UpdateShardCount);
+        DECLARE_DATASTREAMS_PROCESSOR(UpdateStreamMode);
+        DECLARE_DATASTREAMS_PROCESSOR(RegisterStreamConsumer);
+        DECLARE_DATASTREAMS_PROCESSOR(DeregisterStreamConsumer);
+        DECLARE_DATASTREAMS_PROCESSOR(DescribeStreamConsumer);
+        DECLARE_DATASTREAMS_PROCESSOR(ListStreamConsumers);
+        DECLARE_DATASTREAMS_PROCESSOR(AddTagsToStream);
+        DECLARE_DATASTREAMS_PROCESSOR(DisableEnhancedMonitoring);
+        DECLARE_DATASTREAMS_PROCESSOR(EnableEnhancedMonitoring);
+        DECLARE_DATASTREAMS_PROCESSOR(ListTagsForStream);
+        DECLARE_DATASTREAMS_PROCESSOR(MergeShards);
+        DECLARE_DATASTREAMS_PROCESSOR(RemoveTagsFromStream);
+        DECLARE_DATASTREAMS_PROCESSOR(SplitShard);
+        DECLARE_DATASTREAMS_PROCESSOR(StartStreamEncryption);
+        DECLARE_DATASTREAMS_PROCESSOR(StopStreamEncryption);
+        #undef DECLARE_DATASTREAMS_PROCESSOR
+
+        #define DECLARE_YMQ_PROCESSOR(name) Name2YmqProcessor[#name] = MakeHolder<THttpRequestProcessor<Ydb::Ymq::V1::YmqService, name##Request, name##Response, name##Result,\
+                    decltype(&Ydb::Ymq::V1::YmqService::Stub::Async##name), NKikimr::NGRpcService::TEvYmq##name##Request>> \
+                    (#name, &Ydb::Ymq::V1::YmqService::Stub::Async##name);
+
+        // DECLARE_YMQ_PROCESSOR(GetQueueUrl);
+        #undef DECLARE_YMQ_PROCESSOR
+
         #undef DECLARE_PROCESSOR
     }
 
     bool THttpRequestProcessors::Execute(const TString& name, THttpRequestContext&& context,
                                          THolder<NKikimr::NSQS::TAwsRequestSignV4> signature,
                                          const TActorContext& ctx) {
-        if (auto proc = Name2Processor.find(name); proc != Name2Processor.end()) {
+        Cerr << "KLACK: THttpRequestProcessors::Execute() name=" << name << "\n";
+        //TODO: вынести константу в место, общее с юнит-тестами
+        auto* Name2Processor = (context.ApiVersion == "AmazonSQS")
+            ? &Name2DataStreamsProcessor
+            : &Name2YmqProcessor;
+
+        if (auto proc = Name2Processor->find(name); proc != Name2Processor->end()) {
             proc->second->Execute(std::move(context), std::move(signature), ctx);
             return true;
         }
@@ -823,6 +841,7 @@ namespace NKikimr::NHttpProxy {
                 TVector<TString> parts = SplitString(requestTarget, ".");
                 ApiVersion = parts.size() > 0 ? parts[0] : "";
                 MethodName = parts.size() > 1 ? parts[1] : "";
+                Cerr << "KLACK: THttpRequestContext::ParseHeaders() ApiVersion = " << ApiVersion << "; MethodName = " << MethodName << ";";
             } else if (AsciiEqualsIgnoreCase(header.first, REQUEST_CONTENT_TYPE_HEADER)) {
                 ContentType = mimeByStr(header.second);
             } else if (AsciiEqualsIgnoreCase(header.first, REQUEST_DATE_HEADER)) {

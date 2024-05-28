@@ -178,6 +178,14 @@ public:
     }
 
 
+    static NJson::TJsonValue CreateSqsGetQueueUrlRequest() {
+        NJson::TJsonValue record;
+        record["QueueName"] = "ExampleQueueName";
+        record["QueueOwnerAWSAccountId"] = "ExampleAccountId";
+        return record;
+    }
+
+
     THttpResult SendHttpRequestRaw(const TString& handler, const TString& target,
                                    const IOutputStream::TPart& body, const TString& authorizationStr,
                                    const TString& contentType = "application/json") {
@@ -332,6 +340,8 @@ private:
         appConfig.MutablePQConfig()->AddValidWriteSpeedLimitsKbPerSec(512);
         appConfig.MutablePQConfig()->AddValidWriteSpeedLimitsKbPerSec(1_KB);
         appConfig.MutablePQConfig()->MutableBillingMeteringConfig()->SetEnabled(true);
+
+        appConfig.MutableSqsConfig()->SetEnableSqs(true);
 
         auto limit = appConfig.MutablePQConfig()->AddValidRetentionLimits();
         limit->SetMinPeriodSeconds(0);

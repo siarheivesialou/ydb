@@ -8,6 +8,7 @@ extern bool ForceFork_;
 extern TString FormAuthorizationStr(const TString& region);
 extern NJson::TJsonValue CreateCreateStreamRequest();
 extern NJson::TJsonValue CreateDescribeStreamRequest();
+extern NJson::TJsonValue CreateSqsGetQueueUrlRequest();
 extern struct THttpResult httpResult;
 
 extern THttpResult SendHttpRequest(
@@ -1524,5 +1525,12 @@ Y_UNIT_TEST_SUITE(TestHttpProxy) {
             UNIT_ASSERT_VALUES_EQUAL(res.HttpCode, 400);
             UNIT_ASSERT_VALUES_EQUAL(res.Description, "MissingParameter");
         }
+    }
+
+    Y_UNIT_TEST_F(TestSQS, THttpProxyTestMock) {
+        auto req = CreateSqsGetQueueUrlRequest();
+        auto res = SendHttpRequest("/Root", "AmazonSQS.GetQueueUrl", std::move(req), FormAuthorizationStr("ru-central1"));
+        Cerr << res.HttpCode << " " << res.Body << "\n";
+        UNIT_ASSERT_VALUES_EQUAL(res.HttpCode, 200);
     }
 } // Y_UNIT_TEST_SUITE(TestHttpProxy)

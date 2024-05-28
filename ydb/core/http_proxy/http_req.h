@@ -119,7 +119,8 @@ public:
                  const TActorContext& ctx);
 
 private:
-    THashMap<TString, THolder<IHttpRequestProcessor>> Name2Processor;
+    THashMap<TString, THolder<IHttpRequestProcessor>> Name2DataStreamsProcessor;
+    THashMap<TString, THolder<IHttpRequestProcessor>> Name2YmqProcessor;
 };
 
 NActors::IActor* CreateAccessServiceActor(const NKikimrConfig::TServerlessProxyConfig& config);
