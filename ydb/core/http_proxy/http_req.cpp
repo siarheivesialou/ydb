@@ -1391,8 +1391,8 @@ namespace NKikimr::NHttpProxy {
         Cerr << "KLACK: THttpRequestProcessors::Execute() name=" << name << "\n";
         //TODO: вынести константу в место, общее с юнит-тестами
         auto* Name2Processor = (context.ApiVersion == "AmazonSQS")
-            ? &Name2DataStreamsProcessor
-            : &Name2YmqProcessor;
+            ? &Name2YmqProcessor
+            : &Name2DataStreamsProcessor;
 
         if (auto proc = Name2Processor->find(name); proc != Name2Processor->end()) {
             proc->second->Execute(std::move(context), std::move(signature), ctx);
