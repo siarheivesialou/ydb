@@ -45,6 +45,7 @@
 #include <ydb/services/datastreams/shard_iterator.h>
 #include <ydb/services/lib/sharding/sharding.h>
 
+#include <ydb/public/sdk/cpp/client/ydb_ymq/ymq.h>
 #include <ydb/services/ymq/ymq_proxy.h>
 
 
@@ -671,14 +672,12 @@ namespace NKikimr::NHttpProxy {
         DECLARE_DATASTREAMS_PROCESSOR(StopStreamEncryption);
         #undef DECLARE_DATASTREAMS_PROCESSOR
 
-        #define DECLARE_YMQ_PROCESSOR(name) Name2YmqProcessor[#name] = MakeHolder<THttpRequestProcessor<Ydb::Ymq::V1::YmqService, name##Request, name##Response, name##Result,\
+        #define DECLARE_YMQ_PROCESSOR(name) Name2YmqProcessor[#name] = MakeHolder<THttpRequestProcessor<Ydb::Ymq::V1::YmqService, Ydb::Ymq::V1::name##Request, Ydb::Ymq::V1::name##Response, Ydb::Ymq::V1::name##Result,\
                     decltype(&Ydb::Ymq::V1::YmqService::Stub::Async##name), NKikimr::NGRpcService::TEvYmq##name##Request>> \
                     (#name, &Ydb::Ymq::V1::YmqService::Stub::Async##name);
 
-        // DECLARE_YMQ_PROCESSOR(GetQueueUrl);
+        DECLARE_YMQ_PROCESSOR(GetQueueUrl);
         #undef DECLARE_YMQ_PROCESSOR
-
-        #undef DECLARE_PROCESSOR
     }
 
     bool THttpRequestProcessors::Execute(const TString& name, THttpRequestContext&& context,
