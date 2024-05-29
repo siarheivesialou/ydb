@@ -173,6 +173,385 @@ namespace NKikimr::NHttpProxy {
     constexpr TStringBuf CRC32_HEADER = "x-amz-crc32";
     static const TString CREDENTIAL_PARAM = "credential";
 
+
+    template<class TProtoService, class TProtoRequest, class TProtoResponse, class TProtoResult, class TProtoCall, class TRpcEv>
+    class TLocalRpcHttpRequestProcessor : public IHttpRequestProcessor {
+    public:
+        enum TRequestState {
+            StateIdle,
+            StateAuthentication,
+            StateAuthorization,
+            StateListEndpoints,
+            StateGrpcRequest,
+            StateFinished
+        };
+
+        enum TEv {
+            EvRequest,
+            EvResponse,
+            EvResult
+        };
+
+    public:
+        TLocalRpcHttpRequestProcessor(TString method, TProtoCall protoCall)
+            : Method(method)
+            , ProtoCall(protoCall)
+        {
+        }
+
+        const TString& Name() const override {
+            return Method;
+        }
+
+        void Execute(THttpRequestContext&& context, THolder<NKikimr::NSQS::TAwsRequestSignV4> signature, const TActorContext& ctx) override {
+            ctx.Register(new TLocalRpcHttpRequestActor(
+                    std::move(context),
+                    std::move(signature),
+                    ProtoCall, Method));
+        }
+
+    private:
+
+
+        class TLocalRpcHttpRequestActor : public NActors::TActorBootstrapped<TLocalRpcHttpRequestActor> {
+        public:
+            using TBase = NActors::TActorBootstrapped<TLocalRpcHttpRequestActor>;
+
+            TLocalRpcHttpRequestActor(THttpRequestContext&& httpContext,
+                              THolder<NKikimr::NSQS::TAwsRequestSignV4>&& signature,
+                              TProtoCall protoCall, const TString& method)
+                : HttpContext(std::move(httpContext))
+                , Signature(std::move(signature))
+                , ProtoCall(protoCall)
+                , Method(method)
+            {
+            }
+
+            TStringBuilder LogPrefix() const {
+                return HttpContext.LogPrefix();
+            }
+
+        private:
+            STFUNC(StateWork)
+            {
+                switch (ev->GetTypeRewrite()) {
+                    HFunc(TEvents::TEvWakeup, HandleTimeout);
+                    HFunc(TEvServerlessProxy::TEvErrorWithIssue, HandleErrorWithIssue);
+                    HFunc(TEvServerlessProxy::TEvGrpcRequestResult, HandleGrpcResponse);
+                    HFunc(TEvServerlessProxy::TEvToken, HandleToken);
+                    default:
+                        HandleUnexpectedEvent(ev);
+                        break;
+                }
+            }
+
+            void SendGrpcRequestNoDriver(const TActorContext& ctx) {
+                RequestState = StateGrpcRequest;
+                LOG_SP_INFO_S(ctx, NKikimrServices::HTTP_PROXY,
+                              "sending grpc request to '" << HttpContext.DiscoveryEndpoint <<
+                              "' database: '" << HttpContext.DatabasePath <<
+                              "' iam token size: " << HttpContext.IamToken.size());
+
+                RpcFuture = NRpcService::DoLocalRpc<TRpcEv>(std::move(Request), HttpContext.DatabasePath,
+                                                            HttpContext.SerializedUserToken, ctx.ActorSystem());
+                RpcFuture.Subscribe([actorId = ctx.SelfID, actorSystem = ctx.ActorSystem()]
+                                    (const NThreading::TFuture<TProtoResponse>& future) {
+                    auto& response = future.GetValueSync();
+                    auto result = MakeHolder<TEvServerlessProxy::TEvGrpcRequestResult>();
+                    Y_ABORT_UNLESS(response.operation().ready());
+                    if (response.operation().status() == Ydb::StatusIds::SUCCESS) {
+                        TProtoResult rs;
+                        response.operation().result().UnpackTo(&rs);
+                        result->Message = MakeHolder<TProtoResult>(rs);
+                    }
+                    NYql::TIssues issues;
+                    NYql::IssuesFromMessage(response.operation().issues(), issues);
+                    result->Status = MakeHolder<NYdb::TStatus>(NYdb::EStatus(response.operation().status()),
+                                                               std::move(issues));
+                    actorSystem->Send(actorId, result.Release());
+                });
+                return;
+            }
+
+            void HandleUnexpectedEvent(const TAutoPtr<NActors::IEventHandle>& ev) {
+                Y_UNUSED(ev);
+            }
+
+            void TryUpdateDbInfo(const TDatabase& db, const TActorContext& ctx) {
+                if (db.Path) {
+                    HttpContext.DatabasePath = db.Path;
+                    HttpContext.DatabaseId = db.Id;
+                    HttpContext.CloudId = db.CloudId;
+                    HttpContext.FolderId = db.FolderId;
+                    if (ExtractStreamName<TProtoRequest>(Request).StartsWith(HttpContext.DatabasePath + "/")) {
+                        HttpContext.StreamName =
+                            TruncateStreamName<TProtoRequest>(Request, HttpContext.DatabasePath + "/");
+                    } else {
+                        HttpContext.StreamName = ExtractStreamName<TProtoRequest>(Request);
+                    }
+
+                }
+                ReportInputCounters(ctx);
+            }
+
+            void HandleToken(TEvServerlessProxy::TEvToken::TPtr& ev, const TActorContext& ctx) {
+                HttpContext.ServiceAccountId = ev->Get()->ServiceAccountId;
+                HttpContext.IamToken = ev->Get()->IamToken;
+                HttpContext.SerializedUserToken = ev->Get()->SerializedUserToken;
+
+                TryUpdateDbInfo(ev->Get()->Database, ctx);
+                SendGrpcRequestNoDriver(ctx);
+            }
+
+
+            void HandleErrorWithIssue(TEvServerlessProxy::TEvErrorWithIssue::TPtr& ev, const TActorContext& ctx) {
+                TryUpdateDbInfo(ev->Get()->Database, ctx);
+                ReplyWithError(ctx, ev->Get()->Status, ev->Get()->Response, ev->Get()->IssueCode);
+            }
+
+            void ReplyWithError(const TActorContext& ctx, NYdb::EStatus status, const TString& errorText, size_t issueCode = ISSUE_CODE_GENERIC) {
+                /* deprecated metric: */ ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvCounter{
+                             1, true, true,
+                             {{"method", Method},
+                              {"cloud", HttpContext.CloudId},
+                              {"folder", HttpContext.FolderId},
+                              {"database", HttpContext.DatabaseId},
+                              {"stream", HttpContext.StreamName},
+                              {"code", TStringBuilder() << (int)MapToException(status, Method, issueCode).second},
+                              {"name", "api.http.errors_per_second"}}
+                         });
+
+                ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvCounter{
+                             1, true, true,
+                            {{"database", HttpContext.DatabasePath},
+                              {"method", Method},
+                              {"cloud_id", HttpContext.CloudId},
+                              {"folder_id", HttpContext.FolderId},
+                              {"database_id", HttpContext.DatabaseId},
+                              {"topic", HttpContext.StreamName},
+                              {"code", TStringBuilder() << (int)MapToException(status, Method, issueCode).second},
+                              {"name", "api.http.data_streams.response.count"}}
+                         });
+
+                HttpContext.ResponseData.Status = status;
+                HttpContext.ResponseData.ErrorText = errorText;
+                ReplyToHttpContext(ctx, issueCode);
+
+                ctx.Send(AuthActor, new TEvents::TEvPoisonPill());
+
+                TBase::Die(ctx);
+            }
+
+            void ReplyToHttpContext(const TActorContext& ctx, std::optional<size_t> issueCode = std::nullopt) {
+                ReportLatencyCounters(ctx);
+
+                if (issueCode.has_value()) {
+                    HttpContext.DoReply(ctx, issueCode.value());
+                } else {
+                    HttpContext.DoReply(ctx);
+                }
+            }
+
+            void ReportInputCounters(const TActorContext& ctx) {
+
+                if (InputCountersReported) {
+                    return;
+                }
+                InputCountersReported = true;
+
+                FillInputCustomMetrics<TProtoRequest>(Request, HttpContext, ctx);
+                /* deprecated metric: */ ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvCounter{1, true, true,
+                             BuildLabels(Method, HttpContext, "api.http.requests_per_second", setStreamPrefix)
+                         });
+                ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvCounter{1, true, true,
+                             BuildLabels(Method, HttpContext, "api.http.data_streams.request.count")
+                         });
+            }
+
+            void Handle(TEvServerlessProxy::TEvDiscoverDatabaseEndpointResult::TPtr ev,
+                        const TActorContext& ctx) {
+                if (ev->Get()->DatabaseInfo) {
+                    auto& db = ev->Get()->DatabaseInfo;
+                    HttpContext.FolderId = db->FolderId;
+                    HttpContext.CloudId = db->CloudId;
+                    HttpContext.DatabaseId = db->Id;
+                    HttpContext.DiscoveryEndpoint = db->Endpoint;
+                    HttpContext.DatabasePath = db->Path;
+
+                    if (ExtractStreamName<TProtoRequest>(Request).StartsWith(HttpContext.DatabasePath + "/")) {
+                        HttpContext.StreamName =
+                            TruncateStreamName<TProtoRequest>(Request, HttpContext.DatabasePath + "/");
+                    } else {
+                        HttpContext.StreamName = ExtractStreamName<TProtoRequest>(Request);
+                    }
+                    ReportInputCounters(ctx);
+                    SendGrpcRequestNoDriver(ctx);
+                    return;
+                }
+
+                ReplyWithError(ctx, ev->Get()->Status, ev->Get()->Message);
+            }
+
+            void ReportLatencyCounters(const TActorContext& ctx) {
+                TDuration dur = ctx.Now() - StartTime;
+                /* deprecated metric: */ ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvHistCounter{static_cast<i64>(dur.MilliSeconds()), 1,
+                             BuildLabels(Method, HttpContext, "api.http.requests_duration_milliseconds", setStreamPrefix)
+                        });
+                ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvHistCounter{static_cast<i64>(dur.MilliSeconds()), 1,
+                             BuildLabels(Method, HttpContext, "api.http.data_streams.response.duration_milliseconds")
+                        });
+                //TODO: add api.http.response.duration_milliseconds
+            }
+
+            void HandleGrpcResponse(TEvServerlessProxy::TEvGrpcRequestResult::TPtr ev,
+                                    const TActorContext& ctx) {
+                if (ev->Get()->Status->IsSuccess()) {
+                    ProtoToJson(*ev->Get()->Message, HttpContext.ResponseData.Body,
+                                HttpContext.ContentType == MIME_CBOR);
+                    FillOutputCustomMetrics<TProtoResult>(
+                        *(dynamic_cast<TProtoResult*>(ev->Get()->Message.Get())), HttpContext, ctx);
+                    /* deprecated metric: */ ctx.Send(MakeMetricsServiceID(),
+                             new TEvServerlessProxy::TEvCounter{1, true, true,
+                                 BuildLabels(Method, HttpContext, "api.http.success_per_second", setStreamPrefix)
+                             });
+                    ctx.Send(MakeMetricsServiceID(),
+                             new TEvServerlessProxy::TEvCounter{
+                                 1, true, true,
+                                {{"database", HttpContext.DatabasePath},
+                                  {"method", Method},
+                                  {"cloud_id", HttpContext.CloudId},
+                                  {"folder_id", HttpContext.FolderId},
+                                  {"database_id", HttpContext.DatabaseId},
+                                  {"topic", HttpContext.StreamName},
+                                  {"code", "200"},
+                                  {"name", "api.http.data_streams.response.count"}}
+                         });
+                    ReplyToHttpContext(ctx);
+                } else {
+                    auto retryClass =
+                        NYdb::NTopic::GetRetryErrorClass(ev->Get()->Status->GetStatus());
+
+                    switch (retryClass) {
+                    case ERetryErrorClass::ShortRetry:
+                    case ERetryErrorClass::LongRetry:
+                        RetryCounter.Click();
+                        if (RetryCounter.HasAttemps()) {
+                            return SendGrpcRequestNoDriver(ctx);
+                        }
+                    case ERetryErrorClass::NoRetry: {
+                        TString errorText;
+                        TStringOutput stringOutput(errorText);
+                        ev->Get()->Status->GetIssues().PrintTo(stringOutput);
+                        RetryCounter.Void();
+                        auto issues = ev->Get()->Status->GetIssues();
+                        size_t issueCode = (
+                            issues && issues.begin()->IssueCode != ISSUE_CODE_OK
+                            ) ? issues.begin()->IssueCode : ISSUE_CODE_GENERIC;
+                        return ReplyWithError(ctx, ev->Get()->Status->GetStatus(), errorText, issueCode);
+                        }
+                    }
+                }
+                TBase::Die(ctx);
+            }
+
+            void HandleTimeout(TEvents::TEvWakeup::TPtr ev, const TActorContext& ctx) {
+                Y_UNUSED(ev);
+                return ReplyWithError(ctx, NYdb::EStatus::TIMEOUT, "Request hasn't been completed by deadline");
+            }
+
+            bool IsSqsRequest() {
+                //TODO: пока что это заглушка, потому нужно будет проверять, что за хидер в запросе
+                return true;
+            }
+
+            void ProcessSqsRequest() {
+                
+            }
+
+        public:
+            void Bootstrap(const TActorContext& ctx) {
+                StartTime = ctx.Now();
+                try {
+                    HttpContext.RequestBodyToProto(&Request);
+                } catch (const NKikimr::NSQS::TSQSException& e) {
+                    NYds::EErrorCodes issueCode = NYds::EErrorCodes::OK;
+                    if (e.ErrorClass.ErrorCode == "MissingParameter")
+                        issueCode = NYds::EErrorCodes::MISSING_PARAMETER;
+                    else if (e.ErrorClass.ErrorCode == "InvalidQueryParameter" || e.ErrorClass.ErrorCode == "MalformedQueryString")
+                        issueCode = NYds::EErrorCodes::INVALID_ARGUMENT;
+                    return ReplyWithError(ctx, NYdb::EStatus::BAD_REQUEST, e.what(), static_cast<size_t>(issueCode));
+                } catch (const std::exception& e) {
+                    LOG_SP_WARN_S(ctx, NKikimrServices::HTTP_PROXY,
+                                  "got new request with incorrect json from [" << HttpContext.SourceAddress << "] " <<
+                                  "database '" << HttpContext.DatabasePath << "'");
+                    return ReplyWithError(ctx, NYdb::EStatus::BAD_REQUEST, e.what(), static_cast<size_t>(NYds::EErrorCodes::INVALID_ARGUMENT));
+                }
+
+                if (IsSqsRequest()) {
+                    
+                }
+
+                if (HttpContext.DatabasePath.empty()) {
+                    HttpContext.DatabasePath = ExtractStreamName<TProtoRequest>(Request);
+                }
+
+                LOG_SP_INFO_S(ctx, NKikimrServices::HTTP_PROXY,
+                              "got new request from [" << HttpContext.SourceAddress << "] " <<
+                              "database '" << HttpContext.DatabasePath << "' " <<
+                              "stream '" << ExtractStreamName<TProtoRequest>(Request) << "'");
+
+                if (HttpContext.IamToken.empty() && !Signature) {
+                    SendGrpcRequestNoDriver(ctx);
+                } else {
+                    AuthActor = ctx.Register(AppData(ctx)->DataStreamsAuthFactory->CreateAuthActor(
+                                                    ctx.SelfID, HttpContext, std::move(Signature)));
+                }
+                ctx.Schedule(RequestTimeout, new TEvents::TEvWakeup());
+
+                TBase::Become(&TLocalRpcHttpRequestActor::StateWork);
+            }
+
+        private:
+            TInstant StartTime;
+            TRequestState RequestState = StateIdle;
+            TProtoRequest Request;
+            TDuration RequestTimeout = TDuration::Seconds(60);
+            ui32 PoolId;
+            THttpRequestContext HttpContext;
+            THolder<NKikimr::NSQS::TAwsRequestSignV4> Signature;
+            THolder<NThreading::TFuture<TProtoResultWrapper<TProtoResult>>> Future;
+            NThreading::TFuture<TProtoResponse> RpcFuture;
+            THolder<NThreading::TFuture<void>> DiscoveryFuture;
+            TProtoCall ProtoCall;
+            TString Method;
+            TRetryCounter RetryCounter;
+
+            THolder<TDataStreamsClient> Client;
+
+            TActorId AuthActor;
+            bool InputCountersReported = false;
+        };
+
+    private:
+        TString Method;
+
+        struct TAccessKeySignature {
+            TString AccessKeyId;
+            TString SignedString;
+            TString Signature;
+            TString Region;
+            TInstant SignedAt;
+        };
+
+        TProtoCall ProtoCall;
+    };
+
     template<class TProtoService, class TProtoRequest, class TProtoResponse, class TProtoResult, class TProtoCall, class TRpcEv>
     class THttpRequestProcessor : public IHttpRequestProcessor {
     public:
@@ -210,6 +589,332 @@ namespace NKikimr::NHttpProxy {
         }
 
     private:
+
+
+        class TLocalRpcHttpRequestActor : public NActors::TActorBootstrapped<TLocalRpcHttpRequestActor> {
+        public:
+            using TBase = NActors::TActorBootstrapped<TLocalRpcHttpRequestActor>;
+
+            TLocalRpcHttpRequestActor(THttpRequestContext&& httpContext,
+                              THolder<NKikimr::NSQS::TAwsRequestSignV4>&& signature,
+                              TProtoCall protoCall, const TString& method)
+                : HttpContext(std::move(httpContext))
+                , Signature(std::move(signature))
+                , ProtoCall(protoCall)
+                , Method(method)
+            {
+            }
+
+            TStringBuilder LogPrefix() const {
+                return HttpContext.LogPrefix();
+            }
+
+        private:
+            STFUNC(StateWork)
+            {
+                switch (ev->GetTypeRewrite()) {
+                    HFunc(TEvents::TEvWakeup, HandleTimeout);
+                    HFunc(TEvServerlessProxy::TEvErrorWithIssue, HandleErrorWithIssue);
+                    HFunc(TEvServerlessProxy::TEvGrpcRequestResult, HandleGrpcResponse);
+                    HFunc(TEvServerlessProxy::TEvToken, HandleToken);
+                    default:
+                        HandleUnexpectedEvent(ev);
+                        break;
+                }
+            }
+
+            void SendGrpcRequestNoDriver(const TActorContext& ctx) {
+                RequestState = StateGrpcRequest;
+                LOG_SP_INFO_S(ctx, NKikimrServices::HTTP_PROXY,
+                              "sending grpc request to '" << HttpContext.DiscoveryEndpoint <<
+                              "' database: '" << HttpContext.DatabasePath <<
+                              "' iam token size: " << HttpContext.IamToken.size());
+
+                RpcFuture = NRpcService::DoLocalRpc<TRpcEv>(std::move(Request), HttpContext.DatabasePath,
+                                                            HttpContext.SerializedUserToken, ctx.ActorSystem());
+                RpcFuture.Subscribe([actorId = ctx.SelfID, actorSystem = ctx.ActorSystem()]
+                                    (const NThreading::TFuture<TProtoResponse>& future) {
+                    auto& response = future.GetValueSync();
+                    auto result = MakeHolder<TEvServerlessProxy::TEvGrpcRequestResult>();
+                    Y_ABORT_UNLESS(response.operation().ready());
+                    if (response.operation().status() == Ydb::StatusIds::SUCCESS) {
+                        TProtoResult rs;
+                        response.operation().result().UnpackTo(&rs);
+                        result->Message = MakeHolder<TProtoResult>(rs);
+                    }
+                    NYql::TIssues issues;
+                    NYql::IssuesFromMessage(response.operation().issues(), issues);
+                    result->Status = MakeHolder<NYdb::TStatus>(NYdb::EStatus(response.operation().status()),
+                                                               std::move(issues));
+                    actorSystem->Send(actorId, result.Release());
+                });
+                return;
+            }
+
+            void HandleUnexpectedEvent(const TAutoPtr<NActors::IEventHandle>& ev) {
+                Y_UNUSED(ev);
+            }
+
+            void TryUpdateDbInfo(const TDatabase& db, const TActorContext& ctx) {
+                if (db.Path) {
+                    HttpContext.DatabasePath = db.Path;
+                    HttpContext.DatabaseId = db.Id;
+                    HttpContext.CloudId = db.CloudId;
+                    HttpContext.FolderId = db.FolderId;
+                    if (ExtractStreamName<TProtoRequest>(Request).StartsWith(HttpContext.DatabasePath + "/")) {
+                        HttpContext.StreamName =
+                            TruncateStreamName<TProtoRequest>(Request, HttpContext.DatabasePath + "/");
+                    } else {
+                        HttpContext.StreamName = ExtractStreamName<TProtoRequest>(Request);
+                    }
+
+                }
+                ReportInputCounters(ctx);
+            }
+
+            void HandleToken(TEvServerlessProxy::TEvToken::TPtr& ev, const TActorContext& ctx) {
+                HttpContext.ServiceAccountId = ev->Get()->ServiceAccountId;
+                HttpContext.IamToken = ev->Get()->IamToken;
+                HttpContext.SerializedUserToken = ev->Get()->SerializedUserToken;
+
+                TryUpdateDbInfo(ev->Get()->Database, ctx);
+                SendGrpcRequestNoDriver(ctx);
+            }
+
+
+            void HandleErrorWithIssue(TEvServerlessProxy::TEvErrorWithIssue::TPtr& ev, const TActorContext& ctx) {
+                TryUpdateDbInfo(ev->Get()->Database, ctx);
+                ReplyWithError(ctx, ev->Get()->Status, ev->Get()->Response, ev->Get()->IssueCode);
+            }
+
+            void ReplyWithError(const TActorContext& ctx, NYdb::EStatus status, const TString& errorText, size_t issueCode = ISSUE_CODE_GENERIC) {
+                /* deprecated metric: */ ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvCounter{
+                             1, true, true,
+                             {{"method", Method},
+                              {"cloud", HttpContext.CloudId},
+                              {"folder", HttpContext.FolderId},
+                              {"database", HttpContext.DatabaseId},
+                              {"stream", HttpContext.StreamName},
+                              {"code", TStringBuilder() << (int)MapToException(status, Method, issueCode).second},
+                              {"name", "api.http.errors_per_second"}}
+                         });
+
+                ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvCounter{
+                             1, true, true,
+                            {{"database", HttpContext.DatabasePath},
+                              {"method", Method},
+                              {"cloud_id", HttpContext.CloudId},
+                              {"folder_id", HttpContext.FolderId},
+                              {"database_id", HttpContext.DatabaseId},
+                              {"topic", HttpContext.StreamName},
+                              {"code", TStringBuilder() << (int)MapToException(status, Method, issueCode).second},
+                              {"name", "api.http.data_streams.response.count"}}
+                         });
+
+                HttpContext.ResponseData.Status = status;
+                HttpContext.ResponseData.ErrorText = errorText;
+                ReplyToHttpContext(ctx, issueCode);
+
+                ctx.Send(AuthActor, new TEvents::TEvPoisonPill());
+
+                TBase::Die(ctx);
+            }
+
+            void ReplyToHttpContext(const TActorContext& ctx, std::optional<size_t> issueCode = std::nullopt) {
+                ReportLatencyCounters(ctx);
+
+                if (issueCode.has_value()) {
+                    HttpContext.DoReply(ctx, issueCode.value());
+                } else {
+                    HttpContext.DoReply(ctx);
+                }
+            }
+
+            void ReportInputCounters(const TActorContext& ctx) {
+
+                if (InputCountersReported) {
+                    return;
+                }
+                InputCountersReported = true;
+
+                FillInputCustomMetrics<TProtoRequest>(Request, HttpContext, ctx);
+                /* deprecated metric: */ ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvCounter{1, true, true,
+                             BuildLabels(Method, HttpContext, "api.http.requests_per_second", setStreamPrefix)
+                         });
+                ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvCounter{1, true, true,
+                             BuildLabels(Method, HttpContext, "api.http.data_streams.request.count")
+                         });
+            }
+
+            void Handle(TEvServerlessProxy::TEvDiscoverDatabaseEndpointResult::TPtr ev,
+                        const TActorContext& ctx) {
+                if (ev->Get()->DatabaseInfo) {
+                    auto& db = ev->Get()->DatabaseInfo;
+                    HttpContext.FolderId = db->FolderId;
+                    HttpContext.CloudId = db->CloudId;
+                    HttpContext.DatabaseId = db->Id;
+                    HttpContext.DiscoveryEndpoint = db->Endpoint;
+                    HttpContext.DatabasePath = db->Path;
+
+                    if (ExtractStreamName<TProtoRequest>(Request).StartsWith(HttpContext.DatabasePath + "/")) {
+                        HttpContext.StreamName =
+                            TruncateStreamName<TProtoRequest>(Request, HttpContext.DatabasePath + "/");
+                    } else {
+                        HttpContext.StreamName = ExtractStreamName<TProtoRequest>(Request);
+                    }
+                    ReportInputCounters(ctx);
+                    SendGrpcRequestNoDriver(ctx);
+                    return;
+                }
+
+                ReplyWithError(ctx, ev->Get()->Status, ev->Get()->Message);
+            }
+
+            void ReportLatencyCounters(const TActorContext& ctx) {
+                TDuration dur = ctx.Now() - StartTime;
+                /* deprecated metric: */ ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvHistCounter{static_cast<i64>(dur.MilliSeconds()), 1,
+                             BuildLabels(Method, HttpContext, "api.http.requests_duration_milliseconds", setStreamPrefix)
+                        });
+                ctx.Send(MakeMetricsServiceID(),
+                         new TEvServerlessProxy::TEvHistCounter{static_cast<i64>(dur.MilliSeconds()), 1,
+                             BuildLabels(Method, HttpContext, "api.http.data_streams.response.duration_milliseconds")
+                        });
+                //TODO: add api.http.response.duration_milliseconds
+            }
+
+            void HandleGrpcResponse(TEvServerlessProxy::TEvGrpcRequestResult::TPtr ev,
+                                    const TActorContext& ctx) {
+                if (ev->Get()->Status->IsSuccess()) {
+                    ProtoToJson(*ev->Get()->Message, HttpContext.ResponseData.Body,
+                                HttpContext.ContentType == MIME_CBOR);
+                    FillOutputCustomMetrics<TProtoResult>(
+                        *(dynamic_cast<TProtoResult*>(ev->Get()->Message.Get())), HttpContext, ctx);
+                    /* deprecated metric: */ ctx.Send(MakeMetricsServiceID(),
+                             new TEvServerlessProxy::TEvCounter{1, true, true,
+                                 BuildLabels(Method, HttpContext, "api.http.success_per_second", setStreamPrefix)
+                             });
+                    ctx.Send(MakeMetricsServiceID(),
+                             new TEvServerlessProxy::TEvCounter{
+                                 1, true, true,
+                                {{"database", HttpContext.DatabasePath},
+                                  {"method", Method},
+                                  {"cloud_id", HttpContext.CloudId},
+                                  {"folder_id", HttpContext.FolderId},
+                                  {"database_id", HttpContext.DatabaseId},
+                                  {"topic", HttpContext.StreamName},
+                                  {"code", "200"},
+                                  {"name", "api.http.data_streams.response.count"}}
+                         });
+                    ReplyToHttpContext(ctx);
+                } else {
+                    auto retryClass =
+                        NYdb::NTopic::GetRetryErrorClass(ev->Get()->Status->GetStatus());
+
+                    switch (retryClass) {
+                    case ERetryErrorClass::ShortRetry:
+                    case ERetryErrorClass::LongRetry:
+                        RetryCounter.Click();
+                        if (RetryCounter.HasAttemps()) {
+                            return SendGrpcRequestNoDriver(ctx);
+                        }
+                    case ERetryErrorClass::NoRetry: {
+                        TString errorText;
+                        TStringOutput stringOutput(errorText);
+                        ev->Get()->Status->GetIssues().PrintTo(stringOutput);
+                        RetryCounter.Void();
+                        auto issues = ev->Get()->Status->GetIssues();
+                        size_t issueCode = (
+                            issues && issues.begin()->IssueCode != ISSUE_CODE_OK
+                            ) ? issues.begin()->IssueCode : ISSUE_CODE_GENERIC;
+                        return ReplyWithError(ctx, ev->Get()->Status->GetStatus(), errorText, issueCode);
+                        }
+                    }
+                }
+                TBase::Die(ctx);
+            }
+
+            void HandleTimeout(TEvents::TEvWakeup::TPtr ev, const TActorContext& ctx) {
+                Y_UNUSED(ev);
+                return ReplyWithError(ctx, NYdb::EStatus::TIMEOUT, "Request hasn't been completed by deadline");
+            }
+
+            bool IsSqsRequest() {
+                //TODO: пока что это заглушка, потому нужно будет проверять, что за хидер в запросе
+                return true;
+            }
+
+            void ProcessSqsRequest() {
+                
+            }
+
+        public:
+            void Bootstrap(const TActorContext& ctx) {
+                StartTime = ctx.Now();
+                try {
+                    HttpContext.RequestBodyToProto(&Request);
+                } catch (const NKikimr::NSQS::TSQSException& e) {
+                    NYds::EErrorCodes issueCode = NYds::EErrorCodes::OK;
+                    if (e.ErrorClass.ErrorCode == "MissingParameter")
+                        issueCode = NYds::EErrorCodes::MISSING_PARAMETER;
+                    else if (e.ErrorClass.ErrorCode == "InvalidQueryParameter" || e.ErrorClass.ErrorCode == "MalformedQueryString")
+                        issueCode = NYds::EErrorCodes::INVALID_ARGUMENT;
+                    return ReplyWithError(ctx, NYdb::EStatus::BAD_REQUEST, e.what(), static_cast<size_t>(issueCode));
+                } catch (const std::exception& e) {
+                    LOG_SP_WARN_S(ctx, NKikimrServices::HTTP_PROXY,
+                                  "got new request with incorrect json from [" << HttpContext.SourceAddress << "] " <<
+                                  "database '" << HttpContext.DatabasePath << "'");
+                    return ReplyWithError(ctx, NYdb::EStatus::BAD_REQUEST, e.what(), static_cast<size_t>(NYds::EErrorCodes::INVALID_ARGUMENT));
+                }
+
+                if (IsSqsRequest()) {
+                    
+                }
+
+                if (HttpContext.DatabasePath.empty()) {
+                    HttpContext.DatabasePath = ExtractStreamName<TProtoRequest>(Request);
+                }
+
+                LOG_SP_INFO_S(ctx, NKikimrServices::HTTP_PROXY,
+                              "got new request from [" << HttpContext.SourceAddress << "] " <<
+                              "database '" << HttpContext.DatabasePath << "' " <<
+                              "stream '" << ExtractStreamName<TProtoRequest>(Request) << "'");
+
+                if (HttpContext.IamToken.empty() && !Signature) {
+                    SendGrpcRequestNoDriver(ctx);
+                } else {
+                    AuthActor = ctx.Register(AppData(ctx)->DataStreamsAuthFactory->CreateAuthActor(
+                                                    ctx.SelfID, HttpContext, std::move(Signature)));
+                }
+                ctx.Schedule(RequestTimeout, new TEvents::TEvWakeup());
+
+                TBase::Become(&THttpRequestActor::StateWork);
+            }
+
+        private:
+            TInstant StartTime;
+            TRequestState RequestState = StateIdle;
+            TProtoRequest Request;
+            TDuration RequestTimeout = TDuration::Seconds(60);
+            ui32 PoolId;
+            THttpRequestContext HttpContext;
+            THolder<NKikimr::NSQS::TAwsRequestSignV4> Signature;
+            THolder<NThreading::TFuture<TProtoResultWrapper<TProtoResult>>> Future;
+            NThreading::TFuture<TProtoResponse> RpcFuture;
+            THolder<NThreading::TFuture<void>> DiscoveryFuture;
+            TProtoCall ProtoCall;
+            TString Method;
+            TRetryCounter RetryCounter;
+
+            THolder<TDataStreamsClient> Client;
+
+            TActorId AuthActor;
+            bool InputCountersReported = false;
+        };
 
 
         class THttpRequestActor : public NActors::TActorBootstrapped<THttpRequestActor> {
@@ -672,7 +1377,7 @@ namespace NKikimr::NHttpProxy {
         DECLARE_DATASTREAMS_PROCESSOR(StopStreamEncryption);
         #undef DECLARE_DATASTREAMS_PROCESSOR
 
-        #define DECLARE_YMQ_PROCESSOR(name) Name2YmqProcessor[#name] = MakeHolder<THttpRequestProcessor<Ydb::Ymq::V1::YmqService, Ydb::Ymq::V1::name##Request, Ydb::Ymq::V1::name##Response, Ydb::Ymq::V1::name##Result,\
+        #define DECLARE_YMQ_PROCESSOR(name) Name2YmqProcessor[#name] = MakeHolder<TLocalRpcHttpRequestProcessor<Ydb::Ymq::V1::YmqService, Ydb::Ymq::V1::name##Request, Ydb::Ymq::V1::name##Response, Ydb::Ymq::V1::name##Result,\
                     decltype(&Ydb::Ymq::V1::YmqService::Stub::Async##name), NKikimr::NGRpcService::TEvYmq##name##Request>> \
                     (#name, &Ydb::Ymq::V1::YmqService::Stub::Async##name);
 
