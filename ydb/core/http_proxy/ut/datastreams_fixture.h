@@ -33,6 +33,8 @@
 
 #include <ydb/core/http_proxy/auth_factory.h>
 
+#include <ydb/library/folder_service/folder_service.h>
+
 
 using TJMap = NJson::TJsonValue::TMapType;
 using TJVector = NJson::TJsonValue::TArray;
@@ -181,7 +183,6 @@ public:
     static NJson::TJsonValue CreateSqsGetQueueUrlRequest() {
         NJson::TJsonValue record;
         record["QueueName"] = "ExampleQueueName";
-        record["QueueOwnerAWSAccountId"] = "ExampleAccountId";
         return record;
     }
 
@@ -456,6 +457,13 @@ private:
 
         actorId = as->Register(CreateMetricsActor(TMetricsSettings{Counters}));
         as->RegisterLocalService(MakeMetricsServiceID(), actorId);
+
+        NKikimrProto::NFolderService::TFolderServiceConfig folderServiceConfig;
+        folderServiceConfig.SetEnable(false);
+        Cerr << "KLACK THttpProxyTestMock::InitHttpServer(): before registering FolderService\n";
+        actorId = as->Register(NKikimr::NFolderService::CreateFolderServiceActor(folderServiceConfig, "cloud4"));
+        Cerr << "KLACK THttpProxyTestMock::InitHttpServer(): after registering FolderService\n";
+        as->RegisterLocalService(NFolderService::FolderServiceActorId(), actorId);
 
         actorId = as->Register(NHttp::CreateHttpProxy());
         as->RegisterLocalService(MakeHttpServerServiceID(), actorId);

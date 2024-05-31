@@ -31,6 +31,7 @@ class TFolderServiceRequestHandler: public NActors::TActor<TFolderServiceRequest
     NActors::TActorId Delegatee;
 
     void Handle(NKikimr::NFolderService::TEvFolderService::TEvGetCloudByFolderRequest::TPtr& ev) {
+        Cerr << "KLACK TFolderServiceRequestHandler::Handle()\n";
         std::unique_ptr<NActors::IEventBase> request;
         switch (FolderServiceEndpointType) {
             case EFolderServiceEndpointType::ResourceManager:
@@ -173,11 +174,14 @@ public:
     }
 };
 
-NActors::IActor* CreateFolderServiceActor(const NKikimrProto::NFolderService::TFolderServiceConfig& config) {
+NActors::IActor* CreateFolderServiceActor(
+        const NKikimrProto::NFolderService::TFolderServiceConfig& config,
+        const std::optional<TString> mockedCloudId) {
+    Cerr << "KLACK CreateFolderServiceActor()\n";
     if (config.GetEnable()) {
         return new NKikimr::NFolderService::TFolderServiceAdapter(config);
     } else {
-        return NKikimr::NFolderService::CreateMockFolderServiceAdapterActor(config);
+        return NKikimr::NFolderService::CreateMockFolderServiceAdapterActor(config, mockedCloudId);
     }
 }
 } // namespace NKikimr::NFolderService

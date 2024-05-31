@@ -7,6 +7,9 @@ namespace NKikimr::NFolderService {
 
 NActors::TActorId FolderServiceActorId();
 
-NActors::IActor* CreateFolderServiceActor(const NKikimrProto::NFolderService::TFolderServiceConfig& config);
+NActors::IActor* CreateFolderServiceActor(
+        const NKikimrProto::NFolderService::TFolderServiceConfig& config,
+        std::optional<TString> mockedCloudId = std::nullopt
+);
 
 } // namespace NKikimr::NFolderService

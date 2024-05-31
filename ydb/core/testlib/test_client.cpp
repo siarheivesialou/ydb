@@ -1133,7 +1133,7 @@ namespace Tests {
                 "TestTenant",
                 nullptr, // MakeIntrusive<NPq::NConfigurationManager::TConnections>(),
                 YqSharedResources,
-                NKikimr::NFolderService::CreateMockFolderServiceAdapterActor,
+                [](auto& config) { return NKikimr::NFolderService::CreateMockFolderServiceAdapterActor(config, std::nullopt);},
                 /*IcPort = */0,
                 {}
                 );
