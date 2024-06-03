@@ -665,7 +665,7 @@ namespace NKikimr::NHttpProxy {
 
             void HandleYmqPropertiesResponse(TEvYmqPropertiesResponse::TPtr ev, const TActorContext& ctx) {
                 Y_UNUSED(ev);
-                Y_UNUSED(ctx);
+                SendGrpcRequestNoDriver(ctx);
                 Cerr << "KLACK TLocalRpcHttpRequestActro::HandleYmqPropertiesResponse\n";
             }
 

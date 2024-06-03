@@ -53,11 +53,13 @@ namespace NKikimr::NYmq::V1 {
     TGetQueueUrlActor::TGetQueueUrlActor(NKikimr::NGRpcService::IRequestOpCtx* request)
         : TBase(request)
     {
+        Cerr << "KLACK TGetQueueUrlActor::TGetQueueUrlActor()\n";
         Y_UNUSED(request);
     }
 
     void TGetQueueUrlActor::Bootstrap(const NActors::TActorContext& ctx) {
         Y_UNUSED(ctx);
+        Cerr << "KLACK TGetQueueUrlActor::Bootstrap()\n";
         // auto requestHolder = MakeHolder<TSqsRequest>();
         // requestHolder->SetRequestId(); // добавить в прото?
         // requestHolder->MutableGetQueueUrl()->SetQueueName(GetProtoRequest()->queue_name());
