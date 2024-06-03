@@ -322,8 +322,10 @@ namespace NKikimr::NHttpProxy {
         }
 
         void HandleFolderServiceResponse(NKikimr::NFolderService::TEvFolderService::TEvGetCloudByFolderResponse::TPtr& ev, const TActorContext& ctx) {
-            Y_UNUSED(ctx);
             Cerr << "KLACK TSQSTicketExchanger::HandleFolderServiceResponse(), ev->Get()->CloudId == " << ev->Get()->CloudId<< "\n";
+            auto response = MakeHolder<TEvYmqPropertiesResponse>(CloudId = ev->Get()->CloudId, FolderId);
+            Send(Sender, response.Release());
+            Die(ctx);
         }
 
         void RequestFolderService(TString& folderId) {
@@ -429,6 +431,7 @@ namespace NKikimr::NHttpProxy {
                     HFunc(TEvServerlessProxy::TEvErrorWithIssue, HandleErrorWithIssue);
                     HFunc(TEvServerlessProxy::TEvGrpcRequestResult, HandleGrpcResponse);
                     HFunc(TEvServerlessProxy::TEvToken, HandleToken);
+                    HFunc(TEvYmqPropertiesResponse, HandleYmqPropertiesResponse);
                     default:
                         HandleUnexpectedEvent(ev);
                         break;
@@ -658,6 +661,12 @@ namespace NKikimr::NHttpProxy {
             void HandleTimeout(TEvents::TEvWakeup::TPtr ev, const TActorContext& ctx) {
                 Y_UNUSED(ev);
                 return ReplyWithError(ctx, NYdb::EStatus::TIMEOUT, "Request hasn't been completed by deadline");
+            }
+
+            void HandleYmqPropertiesResponse(TEvYmqPropertiesResponse::TPtr ev, const TActorContext& ctx) {
+                Y_UNUSED(ev);
+                Y_UNUSED(ctx);
+                Cerr << "KLACK TLocalRpcHttpRequestActro::HandleYmqPropertiesResponse\n";
             }
 
             bool IsSqsRequest() {

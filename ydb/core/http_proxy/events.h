@@ -148,6 +148,19 @@ namespace NKikimr::NHttpProxy {
         };
     };
 
+    enum TEv {
+        EvYmqPropertiesResponse
+    };
+
+    struct TEvYmqPropertiesResponse: public TEventLocal<TEvYmqPropertiesResponse, EvYmqPropertiesResponse> {
+        TString CloudId;
+        TString FolderId;
+
+        TEvYmqPropertiesResponse(const TString& cloudId, const TString& folderId)
+        : CloudId(cloudId)
+        , FolderId(folderId)
+        {}
+    };
 
     inline TActorId MakeAccessServiceID() {
         static const char x[12] = "accss_srvce";
