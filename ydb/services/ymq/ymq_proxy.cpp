@@ -42,9 +42,20 @@ namespace NKikimr::NYmq::V1 {
     }
 
     class TYmqReplyCallback : public NSQS::IReplyCallback {
-        void DoSendReply(const NKikimrClient::TSqsResponse& resp) {
-            Cerr << "KLACK TYmqReplyCallback::DoSendReply(): " << resp.AsJSON() << "\n";
-        }
+        public:
+            TYmqReplyCallback(std::shared_ptr<NKikimr::NGRpcService::IRequestOpCtx> request)
+                : Request(request)
+            {
+                Cerr << "KLACK TYmqReplyCallback::TYmqReplyCallback()\n";
+            }
+            void DoSendReply(const NKikimrClient::TSqsResponse& resp) {
+                Cerr << "KLACK TYmqReplyCallback::DoSendReply(): " << resp.AsJSON() << "\n";
+                Ydb::Ymq::V1::GetQueueUrlResult result;
+                //TODO: возвращать правильный ответ
+                Request->SendResult(result, Ydb::StatusIds::StatusCode::StatusIds_StatusCode_SUCCESS);
+            }
+        private:
+            std::shared_ptr<NKikimr::NGRpcService::IRequestOpCtx> Request;
     };
 
     class TGetQueueUrlActor : public TRpcRequestWithOperationParamsActor<TGetQueueUrlActor, TEvYmqGetQueueUrlRequest, true> {
@@ -97,7 +108,7 @@ namespace NKikimr::NYmq::V1 {
         //     *ctx.ActorSystem(),
         //     std::move(data));
 
-        auto replyCallback = MakeHolder<TYmqReplyCallback>();
+        auto replyCallback = MakeHolder<TYmqReplyCallback>(Request_);
         auto actor = CreateProxyActionActor(*requestHolder.Release(), std::move(replyCallback), true);
         //TODO: executorPool == 0 верно?
         ctx.ActorSystem()->Register(actor, NActors::TMailboxType::HTSwap, 0);
