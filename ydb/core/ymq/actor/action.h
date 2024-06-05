@@ -70,6 +70,7 @@ public:
     }
 
     void DoBootstrap() {
+        Cerr << "KLACK TActionActor::DoBootstrap()\n";
         ui64 configurationFlags = 0;
         if (TDerived::NeedQueueAttributes()) {
             configurationFlags |= TSqsEvents::TEvGetConfiguration::EFlags::NeedQueueAttributes;
@@ -109,6 +110,7 @@ public:
     }
 
     void Bootstrap(const NActors::TActorContext&) {    
+        Cerr << "KLACK TActionActor::Bootstrap()\n";
         #define SQS_REQUEST_CASE(action)                                        \
             const auto& request = SourceSqsRequest_.Y_CAT(Get, action)();       \
             auto response = Response_.Y_CAT(Mutable, action)();                 \
@@ -130,7 +132,9 @@ public:
             this->Schedule(TDuration::MilliSeconds(cfg.GetRequestTimeoutMs()), new TEvWakeup(REQUEST_TIMEOUT_WAKEUP_TAG), TimeoutCookie_.Get());
         }
 
+        Cerr << "KLACK TActionActor::Bootstrap() IsCloud() == " << IsCloud() << " \n";
         if (IsCloud()) {
+            Cerr << "KLACK TActionActor::Bootstrap() FolderId_ == " << FolderId_ << " \n";
             if (!FolderId_) {
                 MakeError(MutableErrorDesc(), NErrors::INVALID_CLIENT_TOKEN_ID, "Failed to parse cloud_id/folder_id.");
                 SendReplyAndDie();
@@ -593,6 +597,7 @@ private:
     void HandleConfiguration(TSqsEvents::TEvConfiguration::TPtr& ev) {
         const TDuration confDuration = TActivationContext::Now() - StartTs_;
         RLOG_SQS_DEBUG("Get configuration duration: " << confDuration.MilliSeconds() << "ms");
+        Cerr << "KLACK TActionActor::HandleConfiguration()\n";
 
         RootUrl_  = std::move(ev->Get()->RootUrl);
         UserExists_ = ev->Get()->UserExists;

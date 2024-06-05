@@ -34,6 +34,7 @@
 #include <ydb/core/http_proxy/auth_factory.h>
 
 #include <ydb/library/folder_service/folder_service.h>
+#include <ydb/core/ymq/actor/serviceid.h>
 
 
 using TJMap = NJson::TJsonValue::TMapType;
@@ -388,6 +389,28 @@ private:
         acl.AddAccess(NACLib::EAccessType::Allow, NACLib::GenericFull, "proxy_sa@as");
 
         client.ModifyACL("/", "Root", acl.SerializeAsString());
+
+
+        client.MkDir("/Root", "SQS");
+
+        client.CreateTable("/Root/SQS",
+           "Name: \".Queues\""
+           "Columns { Name: \"QueueName\"          Type: \"Utf8\"}"
+           "Columns { Name: \"QueueId\"            Type: \"String\"}"
+           "Columns { Name: \"QueueState\"         Type: \"Uint64\"}"
+           "Columns { Name: \"FifoQueue\"          Type: \"Bool\"}"
+           "Columns { Name: \"CreatedTimestamp\"   Type: \"Uint64\"}"
+           "Columns { Name: \"Shards\"             Type: \"Uint64\"}"
+           "Columns { Name: \"Partitions\"         Type: \"Uint64\"}"
+           "Columns { Name: \"MasterTabletId\"     Type: \"Uint64\"}"
+           "Columns { Name: \"CustomQueueName\"    Type: \"Utf8\"}"
+           "Columns { Name: \"FolderId\"           Type: \"Utf8\"}"
+           "Columns { Name: \"Version\"            Type: \"Uint64\"}"
+           "Columns { Name: \"DlqName\"            Type: \"Utf8\"}"
+           "Columns { Name: \"TablesFormat\"       Type: \"Uint32\"}"
+           "KeyColumnNames: [\"QueueName\", \"QueueId\"]"
+        );
+
     }
 
     void InitAccessServiceService() {
@@ -464,6 +487,10 @@ private:
         actorId = as->Register(NKikimr::NFolderService::CreateFolderServiceActor(folderServiceConfig, "cloud4"));
         Cerr << "KLACK THttpProxyTestMock::InitHttpServer(): after registering FolderService\n";
         as->RegisterLocalService(NFolderService::FolderServiceActorId(), actorId);
+
+        
+        actorId = as->Register(NSQS::CreateSqsService());
+        as->RegisterLocalService(NSQS::MakeSqsServiceID(1), actorId);
 
         actorId = as->Register(NHttp::CreateHttpProxy());
         as->RegisterLocalService(MakeHttpServerServiceID(), actorId);

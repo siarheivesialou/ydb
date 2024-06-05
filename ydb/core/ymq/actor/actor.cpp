@@ -42,6 +42,7 @@ IActor* CreateActionActor(const NKikimrClient::TSqsRequest& req, THolder<IReplyC
         return Y_CAT(Y_CAT(Create, action), Actor)(req, std::move(cb));  \
     }
 
+    Cerr << "KLACK CreateActionActor(): req.GetRequestCase() == " << std::to_string(req.GetRequestCase()) << "\n";
     switch (req.GetRequestCase()) {
         REQUEST_CASE(ChangeMessageVisibility)
         REQUEST_CASE(ChangeMessageVisibilityBatch)
@@ -79,8 +80,10 @@ IActor* CreateActionActor(const NKikimrClient::TSqsRequest& req, THolder<IReplyC
 
 IActor* CreateProxyActionActor(const NKikimrClient::TSqsRequest& req, THolder<IReplyCallback> cb, bool enableQueueLeader) {
     if (enableQueueLeader && TProxyActor::NeedCreateProxyActor(req)) {
+        Cerr << "KLACK CreateProxyActionActor(): TProxyActor\n";
         return new TProxyActor(req, std::move(cb));
     } else {
+        Cerr << "KLACK CreateProxyActionActor(): CreateActionActor\n";
         return CreateActionActor(req, std::move(cb));
     }
 }

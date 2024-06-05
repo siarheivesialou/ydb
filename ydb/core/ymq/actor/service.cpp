@@ -377,6 +377,7 @@ static TString GetEndpoint(const NKikimrConfig::TSqsConfig& config) {
 void TSqsService::Bootstrap() {
     LOG_SQS_INFO("Start SQS service actor");
     LOG_SQS_DEBUG("SQS service config: " << Cfg());
+    Cerr << "KLACK TSqsService::Bootstrap()\n";
     Become(&TSqsService::StateFunc);
 
     EarlyRequestUsersListBudget_ = EARLY_REQUEST_USERS_LIST_MAX_BUDGET;
@@ -564,6 +565,7 @@ void TSqsService::HandleGetLeaderNodeForQueueRequest(TSqsEvents::TEvGetLeaderNod
 }
 
 void TSqsService::HandleGetConfiguration(TSqsEvents::TEvGetConfiguration::TPtr& ev) {
+    Cerr << "KLACK TSqsService::HandleGetConfiguration()\n";
     TUserInfoPtr user = GetUserOrWait(ev);
     if (!user) {
         return;

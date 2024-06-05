@@ -21,6 +21,7 @@ public:
     TGetQueueUrlActor(const NKikimrClient::TSqsRequest& sourceSqsRequest, THolder<IReplyCallback> cb)
         : TActionActor(sourceSqsRequest, EAction::GetQueueUrl, std::move(cb))
     {
+        Cerr << "KLACK TGetQueueUrlActor()\n";
     }
 
     static constexpr bool NeedExistingQueue() {
@@ -42,6 +43,7 @@ private:
     }
 
     void DoAction() override {
+        Cerr << "KLACK TGetQueueUrlActor::DoAction()\n";
         Become(&TThis::StateFunc);
         Send(MakeSqsServiceID(SelfId().NodeId()), new TSqsEvents::TEvGetQueueId(RequestId_, UserName_, Request().GetQueueName(), FolderId_));
     }

@@ -16,6 +16,7 @@
 #include <ydb/services/persqueue_v1/actors/persqueue_utils.h>
 
 #include <util/folder/path.h>
+#include <ydb/core/ymq/actor/auth_factory.h>
 
 #include <iterator>
 
@@ -40,6 +41,12 @@ namespace NKikimr::NYmq::V1 {
         }
     }
 
+    class TYmqReplyCallback : public NSQS::IReplyCallback {
+        void DoSendReply(const NKikimrClient::TSqsResponse& resp) {
+            Cerr << "KLACK TYmqReplyCallback::DoSendReply(): " << resp.AsJSON() << "\n";
+        }
+    };
+
     class TGetQueueUrlActor : public TRpcRequestWithOperationParamsActor<TGetQueueUrlActor, TEvYmqGetQueueUrlRequest, true> {
         using TBase = TRpcRequestWithOperationParamsActor<TGetQueueUrlActor, TEvYmqGetQueueUrlRequest, true>;
 
@@ -60,31 +67,40 @@ namespace NKikimr::NYmq::V1 {
     void TGetQueueUrlActor::Bootstrap(const NActors::TActorContext& ctx) {
         Y_UNUSED(ctx);
         Cerr << "KLACK TGetQueueUrlActor::Bootstrap()\n";
-        // auto requestHolder = MakeHolder<TSqsRequest>();
-        // requestHolder->SetRequestId(); // добавить в прото?
-        // requestHolder->MutableGetQueueUrl()->SetQueueName(GetProtoRequest()->queue_name());
-        // requestHolder->MutableGetQueueUrl()->MutableAuth()->SetUserName(GetProtoRequest()->); // добавить в прото?
+        auto requestHolder = MakeHolder<TSqsRequest>();
+        //TODO: заменить
+        requestHolder->SetRequestId("changeRequestid"); // добавить в прото?
+        requestHolder->MutableGetQueueUrl()->SetQueueName(GetProtoRequest()->queue_name());
+        requestHolder->MutableGetQueueUrl()->MutableAuth()->SetUserName("cloud4"); // добавить в прото?
+        requestHolder->MutableGetQueueUrl()->MutableAuth()->SetFolderId("folder4"); // добавить в прото?
+        requestHolder->MutableGetQueueUrl()->MutableAuth()->SetUserSID("foobar"); // добавить в прото?
         // this->Request_->ReplyWithYdbStatus(Ydb::StatusIds::SUCCESS);
 
-        // TAuthActorData data {
+        // NSQS::TAuthActorData data {
         //     .SQSRequest = std::move(requestHolder),
         //     .HTTPCallback = std::move(httpCallback),
-        //     .UserSidCallback = [this](const TString& userSid) { UserSid_ = userSid; },
-        //     .EnableQueueLeader = enableQueueLeader,
-        //     .Action = Action_,
+        //     .UserSidCallback = [](const TString& userSid) { Y_UNUSED(userSid); },
+        //     //TODO: что тут должно быть?
+        //     .EnableQueueLeader = true,
+        //     .Action = NSQS::GetQueueUrl,
         //     .ExecutorPoolID = Parent_->PoolId_,
-        //     .CloudID = AccountName_, // добавить в прото?
-        //     .ResourceID = QueueName_, // знаем (в случае других action - извлекать из queueUrl)
+        //     .CloudID = "cloud4", // добавить в прото?
+        //     .ResourceID = GetProtoRequest()->queue_name(),
+        //     // .Counters = Parent_->CloudAuthCounters_.Get(),
         //     .Counters = Parent_->CloudAuthCounters_.Get(),
         //     .AWSSignature = std::move(AwsSignature_),
         //     .IAMToken = IamToken_, // добавить в прото?
-        //     .FolderID = FolderId_ // добавить в прото?
+        //     .FolderID = "folder4"// добавить в прото?
         // };
 
-        // AppData(Parent_->ActorSystem_)->SqsAuthFactory->RegisterAuthActor(
-        //     *Parent_->ActorSystem_,
+        // AppData(ctx.ActorSystem())->SqsAuthFactory->RegisterAuthActor(
+        //     *ctx.ActorSystem(),
         //     std::move(data));
-        // }
+
+        auto replyCallback = MakeHolder<TYmqReplyCallback>();
+        auto actor = CreateProxyActionActor(*requestHolder.Release(), std::move(replyCallback), true);
+        //TODO: executorPool == 0 верно?
+        ctx.ActorSystem()->Register(actor, NActors::TMailboxType::HTSwap, 0);
     }
 }
 
