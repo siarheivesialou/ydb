@@ -66,12 +66,18 @@ namespace NKikimr::NYmq::V1 {
         ~TGetQueueUrlActor() = default;
 
         void Bootstrap(const NActors::TActorContext& ctx);
+
+    private:
+        const TString FolderId;
+        const TString CloudId;
     };
 
     TGetQueueUrlActor::TGetQueueUrlActor(NKikimr::NGRpcService::IRequestOpCtx* request)
         : TBase(request)
+        , FolderId(request->GetPeerMetaValues("folderId").GetOrElse(""))
+        , CloudId(request->GetPeerMetaValues("cloudId").GetOrElse(""))
     {
-        Cerr << "KLACK TGetQueueUrlActor::TGetQueueUrlActor()\n";
+        Cerr << "KLACK TGetQueueUrlActor::TGetQueueUrlActor(): FolderId == " << FolderId << ", CloudId << " << CloudId << "\n";
         Y_UNUSED(request);
     }
 
@@ -82,8 +88,8 @@ namespace NKikimr::NYmq::V1 {
         //TODO: заменить
         requestHolder->SetRequestId("changeRequestid"); // добавить в прото?
         requestHolder->MutableGetQueueUrl()->SetQueueName(GetProtoRequest()->queue_name());
-        requestHolder->MutableGetQueueUrl()->MutableAuth()->SetUserName("cloud4"); // добавить в прото?
-        requestHolder->MutableGetQueueUrl()->MutableAuth()->SetFolderId("folder4"); // добавить в прото?
+        requestHolder->MutableGetQueueUrl()->MutableAuth()->SetUserName(CloudId); // добавить в прото?
+        requestHolder->MutableGetQueueUrl()->MutableAuth()->SetFolderId(FolderId); // добавить в прото?
         requestHolder->MutableGetQueueUrl()->MutableAuth()->SetUserSID("foobar"); // добавить в прото?
         // this->Request_->ReplyWithYdbStatus(Ydb::StatusIds::SUCCESS);
 

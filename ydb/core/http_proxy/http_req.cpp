@@ -446,8 +446,15 @@ namespace NKikimr::NHttpProxy {
                               "' database: '" << HttpContext.DatabasePath <<
                               "' iam token size: " << HttpContext.IamToken.size());
 
-                RpcFuture = NRpcService::DoLocalRpc<TRpcEv>(std::move(Request), HttpContext.DatabasePath,
-                                                            HttpContext.SerializedUserToken, ctx.ActorSystem());
+                RpcFuture = NRpcService::DoLocalRpc<TRpcEv>(
+                        std::move(Request),
+                        HttpContext.DatabasePath,
+                        HttpContext.SerializedUserToken,
+                        Nothing(),
+                        ctx.ActorSystem(),
+                        FolderId,
+                        CloudId
+                );
 
                 RpcFuture.Subscribe([actorId = ctx.SelfID, actorSystem = ctx.ActorSystem()]
                                     (const NThreading::TFuture<TProtoResponse>& future) {
@@ -665,6 +672,8 @@ namespace NKikimr::NHttpProxy {
 
             void HandleYmqPropertiesResponse(TEvYmqPropertiesResponse::TPtr ev, const TActorContext& ctx) {
                 Y_UNUSED(ev);
+                FolderId = ev->Get()->FolderId;
+                CloudId = ev->Get()->CloudId;
                 SendGrpcRequestNoDriver(ctx);
                 Cerr << "KLACK TLocalRpcHttpRequestActro::HandleYmqPropertiesResponse\n";
             }
@@ -751,6 +760,8 @@ namespace NKikimr::NHttpProxy {
             TActorId AuthActor;
             TActorId TicketExchangerActorId;
             bool InputCountersReported = false;
+            TString FolderId;
+            TString CloudId;
         };
 
     private:

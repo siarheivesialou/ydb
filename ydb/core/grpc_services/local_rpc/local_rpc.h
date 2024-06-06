@@ -67,8 +67,13 @@ public:
         return EmptySerializedTokenMessage_;
     }
 
-    const TMaybe<TString> GetPeerMetaValues(const TString&) const override {
-        return TMaybe<TString>{};
+    const TMaybe<TString> GetPeerMetaValues(const TString& key) const override {
+        auto value = PeerMeta.find(key);
+        return value == PeerMeta.end() ? Nothing() : TMaybe<TString>(value->second);;
+    }
+
+    void PutPeerMeta(const TString& key, const TString& value) {
+        PeerMeta.insert_or_assign(key, value);
     }
 
     TVector<TStringBuf> FindClientCert() const override {
@@ -245,6 +250,7 @@ private:
     const bool InternalCall;
     TIntrusiveConstPtr<NACLib::TUserToken> InternalToken;
     const TString EmptySerializedTokenMessage_;
+    TMap<TString, TString> PeerMeta;
 
     NYql::TIssueManager IssueManager;
     google::protobuf::Arena Arena;
@@ -286,6 +292,33 @@ NThreading::TFuture<typename TRpc::TResponse> DoLocalRpc(typename TRpc::TRequest
 template<typename TRpc>
 NThreading::TFuture<typename TRpc::TResponse> DoLocalRpc(typename TRpc::TRequest&& proto, const TString& database, const TMaybe<TString>& token, TActorSystem* actorSystem, bool internalCall = false) {
     return DoLocalRpc<TRpc>(std::move(proto), database, token, Nothing(), actorSystem, internalCall);
+}
+
+template<typename TRpc>
+NThreading::TFuture<typename TRpc::TResponse> DoLocalRpc(
+        typename TRpc::TRequest&& proto,
+        const TString& database,
+        const TMaybe<TString>& token,
+        const TMaybe<TString>& requestType,
+        TActorSystem* actorSystem,
+        const TString& folderId,
+        const TString& cloudId,
+        bool internalCall = false
+)
+{
+    auto promise = NThreading::NewPromise<typename TRpc::TResponse>();
+
+    SetRequestSyncOperationMode(proto);
+
+    using TCbWrapper = TPromiseWrapper<typename TRpc::TResponse>;
+    auto req = new TLocalRpcCtx<TRpc, TCbWrapper>(std::move(proto), TCbWrapper(promise), database, token, requestType, internalCall);
+    req->PutPeerMeta("folderId", folderId);
+    req->PutPeerMeta("cloudId", cloudId);
+    Cerr << "KLACK DoLocalRpc(): req->GetPeerMetaValues(\"folderId\")" << req->GetPeerMetaValues("folderId") << "\n";
+    auto actor = TRpc::CreateRpcActor(req);
+    actorSystem->Register(actor, TMailboxType::HTSwap, actorSystem->AppData<TAppData>()->UserPoolId);
+
+    return promise.GetFuture();
 }
 
 template<typename TRpc>
