@@ -327,7 +327,8 @@ namespace NKikimr::NHttpProxy {
 
         void HandleFolderServiceResponse(NKikimr::NFolderService::TEvFolderService::TEvGetCloudByFolderResponse::TPtr& ev, const TActorContext& ctx) {
             Cerr << "KLACK TSQSTicketExchanger::HandleFolderServiceResponse(), ev->Get()->CloudId == " << ev->Get()->CloudId<< "\n";
-            auto response = MakeHolder<TEvYmqPropertiesResponse>(CloudId = ev->Get()->CloudId, FolderId);
+            CloudId = ev->Get()->CloudId;
+            auto response = MakeHolder<TEvYmqPropertiesResponse>(CloudId, FolderId, ServiceAccountId);
             Send(Sender, response.Release());
             Die(ctx);
         }
@@ -457,7 +458,8 @@ namespace NKikimr::NHttpProxy {
                         Nothing(),
                         ctx.ActorSystem(),
                         FolderId,
-                        CloudId
+                        CloudId,
+                        UserSid
                 );
 
                 RpcFuture.Subscribe([actorId = ctx.SelfID, actorSystem = ctx.ActorSystem()]
@@ -678,6 +680,7 @@ namespace NKikimr::NHttpProxy {
                 Y_UNUSED(ev);
                 FolderId = ev->Get()->FolderId;
                 CloudId = ev->Get()->CloudId;
+                UserSid = ev->Get()->Sid;
                 SendGrpcRequestNoDriver(ctx);
                 Cerr << "KLACK TLocalRpcHttpRequestActro::HandleYmqPropertiesResponse\n";
             }
@@ -766,6 +769,7 @@ namespace NKikimr::NHttpProxy {
             bool InputCountersReported = false;
             TString FolderId;
             TString CloudId;
+            TString UserSid;
         };
 
     private:

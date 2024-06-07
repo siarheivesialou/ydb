@@ -155,10 +155,12 @@ namespace NKikimr::NHttpProxy {
     struct TEvYmqPropertiesResponse: public TEventLocal<TEvYmqPropertiesResponse, EvYmqPropertiesResponse> {
         TString CloudId;
         TString FolderId;
+        TString Sid;
 
-        TEvYmqPropertiesResponse(const TString& cloudId, const TString& folderId)
+        TEvYmqPropertiesResponse(const TString& cloudId, const TString& folderId, const TString& sid)
         : CloudId(cloudId)
         , FolderId(folderId)
+        , Sid(sid)
         {}
     };
 

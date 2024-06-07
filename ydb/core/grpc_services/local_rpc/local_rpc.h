@@ -303,6 +303,7 @@ NThreading::TFuture<typename TRpc::TResponse> DoLocalRpc(
         TActorSystem* actorSystem,
         const TString& folderId,
         const TString& cloudId,
+        const TString& userSid,
         bool internalCall = false
 )
 {
@@ -314,6 +315,7 @@ NThreading::TFuture<typename TRpc::TResponse> DoLocalRpc(
     auto req = new TLocalRpcCtx<TRpc, TCbWrapper>(std::move(proto), TCbWrapper(promise), database, token, requestType, internalCall);
     req->PutPeerMeta("folderId", folderId);
     req->PutPeerMeta("cloudId", cloudId);
+    req->PutPeerMeta("userSid", userSid);
     Cerr << "KLACK DoLocalRpc(): req->GetPeerMetaValues(\"folderId\")" << req->GetPeerMetaValues("folderId") << "\n";
     auto actor = TRpc::CreateRpcActor(req);
     actorSystem->Register(actor, TMailboxType::HTSwap, actorSystem->AppData<TAppData>()->UserPoolId);
