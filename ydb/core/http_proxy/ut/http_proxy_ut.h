@@ -1532,5 +1532,6 @@ Y_UNIT_TEST_SUITE(TestHttpProxy) {
         auto res = SendHttpRequest("/Root", "AmazonSQS.GetQueueUrl", std::move(req), FormAuthorizationStr("ru-central1"));
         Cerr << res.HttpCode << " " << res.Body << "\n";
         UNIT_ASSERT_VALUES_EQUAL(res.HttpCode, 200);
+        UNIT_ASSERT_VALUES_EQUAL(true, false);
     }
 } // Y_UNIT_TEST_SUITE(TestHttpProxy)

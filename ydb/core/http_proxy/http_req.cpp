@@ -199,55 +199,55 @@ namespace NKikimr::NHttpProxy {
             TBase::Become(&TSQSTicketExchanger::StateWork);
             Cerr << "KLACK TSQSTicketExchanger::Bootstrap()\n";
 
-            THolder<TEvTicketParser::TEvAuthorizeTicket> request;
+            // THolder<TEvTicketParser::TEvAuthorizeTicket> request;
 
-            if (Signature.Get()) {
-                TInstant signedAt;
+            // if (Signature.Get()) {
+            //     TInstant signedAt;
 
-                TEvTicketParser::TEvAuthorizeTicket::TAccessKeySignature signature;
-                signature.AccessKeyId = Signature->GetAccessKeyId();
-                signature.StringToSign = Signature->GetStringToSign();
-                signature.Signature = Signature->GetParsedSignature();
-                signature.Service = "kinesis";
-                signature.Region = Signature->GetRegion();
-                signature.SignedAt = signedAt;
+            //     TEvTicketParser::TEvAuthorizeTicket::TAccessKeySignature signature;
+            //     signature.AccessKeyId = Signature->GetAccessKeyId();
+            //     signature.StringToSign = Signature->GetStringToSign();
+            //     signature.Signature = Signature->GetParsedSignature();
+            //     signature.Service = "kinesis";
+            //     signature.Region = Signature->GetRegion();
+            //     signature.SignedAt = signedAt;
 
-                TVector<TEvTicketParser::TEvAuthorizeTicket::TEntry> entries;
-                Cerr << "KLACK TSQSTicketExchanger::Bootstrap() before sending TEvAuthorizeTicket with signature\n";
-                request = MakeHolder<TEvTicketParser::TEvAuthorizeTicket>(std::move(signature), "", entries);
-            } else {
-                Cerr << "KLACK TSQSTicketExchanger::Bootstrap()\n";
-                Cerr << "KLACK TSQSTicketExchanger::Bootstrap() before sending TEvAuthorizeTicket with IamToken\n";
-                request = MakeHolder<TEvTicketParser::TEvAuthorizeTicket>(IamToken, "");
-            }
+            //     TVector<TEvTicketParser::TEvAuthorizeTicket::TEntry> entries;
+            //     Cerr << "KLACK TSQSTicketExchanger::Bootstrap() before sending TEvAuthorizeTicket with signature\n";
+            //     request = MakeHolder<TEvTicketParser::TEvAuthorizeTicket>(std::move(signature), "", entries);
+            // } else {
+            //     Cerr << "KLACK TSQSTicketExchanger::Bootstrap()\n";
+            //     Cerr << "KLACK TSQSTicketExchanger::Bootstrap() before sending TEvAuthorizeTicket with IamToken\n";
+            //     request = MakeHolder<TEvTicketParser::TEvAuthorizeTicket>(IamToken, "");
+            // }
 
-            ctx.Send(MakeTicketParserID(), request.Release());
+            // ctx.Send(MakeTicketParserID(), request.Release());
 
 
-            // THolder<NCloud::TEvAccessService::TEvAuthenticateRequest> request =
-            //     MakeHolder<NCloud::TEvAccessService::TEvAuthenticateRequest>();
-            // request->RequestId = RequestId;
+            THolder<NCloud::TEvAccessService::TEvAuthenticateRequest> request =
+                MakeHolder<NCloud::TEvAccessService::TEvAuthenticateRequest>();
+            request->RequestId = RequestId;
 
-            // auto& signature = *request->Request.mutable_signature();
-            // signature.set_access_key_id(Signature->GetAccessKeyId());
-            // signature.set_string_to_sign(Signature->GetStringToSign());
-            // signature.set_signature(Signature->GetParsedSignature());
+            auto& signature = *request->Request.mutable_signature();
+            signature.set_access_key_id(Signature->GetAccessKeyId());
+            signature.set_string_to_sign(Signature->GetStringToSign());
+            signature.set_signature(Signature->GetParsedSignature());
 
-            // auto& v4params = *signature.mutable_v4_parameters();
-            // v4params.set_service("kinesis");
-            // v4params.set_region(Signature->GetRegion());
+            auto& v4params = *signature.mutable_v4_parameters();
+            v4params.set_service("kinesis");
+            v4params.set_region(Signature->GetRegion());
             
-            // TInstant signedAt;
-            // const ui64 nanos = signedAt.NanoSeconds();
-            // const ui64 seconds = nanos / 1'000'000'000ull;
-            // const ui64 nanos_left = nanos % 1'000'000'000ull;
+            TInstant signedAt;
+            const ui64 nanos = signedAt.NanoSeconds();
+            const ui64 seconds = nanos / 1'000'000'000ull;
+            const ui64 nanos_left = nanos % 1'000'000'000ull;
 
-            // v4params.mutable_signed_at()->set_seconds(seconds);
-            // v4params.mutable_signed_at()->set_nanos(nanos_left);
+            v4params.mutable_signed_at()->set_seconds(seconds);
+            v4params.mutable_signed_at()->set_nanos(nanos_left);
 
-            // Cerr << "KLACK TSQSTicketExchanger::Bootstrap(): before send\n";
-            // ctx.Send(MakeAccessServiceID(), std::move(request));
-            // Cerr << "KLACK TSQSTicketExchanger::Bootstrap(): after send\n";
+            Cerr << "KLACK TSQSTicketExchanger::Bootstrap(): before send\n";
+            ctx.Send(MakeAccessServiceID(), std::move(request));
+            Cerr << "KLACK TSQSTicketExchanger::Bootstrap(): after send\n";
         }
     
         const TActorId Sender;
@@ -287,7 +287,7 @@ namespace NKikimr::NHttpProxy {
         void HandleAuthenticationResult(NCloud::TEvAccessService::TEvAuthenticateResponse::TPtr& ev,
                                         const TActorContext& ctx) {
 
-            Cerr << "KLACK TSQSTicketExchanger::HandleAuthenticationResult: ev->Get()->Status.Ok() == " << std::to_string(ev->Get()->Status.Ok()) << "/n";
+            Cerr << "KLACK TSQSTicketExchanger::HandleAuthenticationResult: ev->Get()->Status.Ok() == " << std::to_string(ev->Get()->Status.Ok()) << "\n";
             if (!ev->Get()->Status.Ok()) {
                 return ReplyWithError(ctx, ev->Get()->Status.InternalError || NKikimr::IsRetryableGrpcError(ev->Get()->Status)
                                                                     ? NYdb::EStatus::UNAVAILABLE
@@ -302,6 +302,10 @@ namespace NKikimr::NHttpProxy {
             RetryCounter.Void();
 
             ServiceAccountId = ev->Get()->Response.subject().service_account().id();
+            FolderId = ev->Get()->Response.subject().service_account().folder_id();
+            Cerr << "KLACK TSQSTicketExchanger::HandleAuthenticationResult: ev->Get()->Response.subject().service_account().folder_id() == " << ev->Get()->Response.subject().service_account().folder_id() <<  "\n";
+
+            RequestFolderService(FolderId);
             LOG_SP_INFO_S(ctx, NKikimrServices::HTTP_PROXY, "authenticated to " << ServiceAccountId);
         }
 
