@@ -464,6 +464,20 @@ namespace NKikimr::NHttpProxy {
 
                 RpcFuture.Subscribe([actorId = ctx.SelfID, actorSystem = ctx.ActorSystem()]
                                     (const NThreading::TFuture<TProtoResponse>& future) {
+
+                    // auto& response = future.GetValueSync();
+                    // auto result = MakeHolder<TEvServerlessProxy::TEvGrpcRequestResult>();
+                    // Y_ABORT_UNLESS(response.operation().ready());
+                    // if (response.operation().status() == Ydb::StatusIds::SUCCESS) {
+                    //     TProtoResult rs;
+                    //     response.operation().result().UnpackTo(&rs);
+                    //     result->Message = MakeHolder<TProtoResult>(rs);
+                    // }
+                    // NYql::TIssues issues;
+                    // NYql::IssuesFromMessage(response.operation().issues(), issues);
+                    // result->Status = MakeHolder<NYdb::TStatus>(NYdb::EStatus(response.operation().status()),
+                    //                                            std::move(issues));
+                    // actorSystem->Send(actorId, result.Release());
                     Cerr << "KLACK TLocalRpccHttpRequestActor::SendGrpcRequestNoDriver(): got reply\n";
                     auto& response = future.GetValueSync();
                     auto result = MakeHolder<TEvServerlessProxy::TEvGrpcRequestResult>();

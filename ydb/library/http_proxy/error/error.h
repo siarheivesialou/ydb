@@ -10,8 +10,10 @@ struct TErrorClass {
     const TString ErrorCode;
     const ui32 HttpStatusCode;
     const TString DefaultMessage;
+    const ui32 Id;
 
     TErrorClass(TString errorCode, ui32 httpStatusCode, TString defaultMessage);
+    TErrorClass(TString errorCode, ui32 httpStatusCode, TString defaultMessage, ui32 id);
     TErrorClass() = delete;
     TErrorClass(const TErrorClass&) = delete;
     TErrorClass(TErrorClass&&) = delete;
@@ -20,6 +22,7 @@ struct TErrorClass {
         return RegisteredCodes;
     }
 
+    static THashMap<ui32, TErrorClass*> IdToErrorClass;
 private:
     static THashSet<TString> RegisteredCodes;
 };

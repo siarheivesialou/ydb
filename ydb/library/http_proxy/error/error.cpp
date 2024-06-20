@@ -3,13 +3,25 @@
 namespace NKikimr::NSQS {
 
 THashSet<TString> TErrorClass::RegisteredCodes;
+THashMap<ui32, TErrorClass*> TErrorClass::IdToErrorClass;
 
 TErrorClass::TErrorClass(TString errorCode, ui32 httpStatusCode, TString defaultMessage)
     : ErrorCode(std::move(errorCode))
     , HttpStatusCode(httpStatusCode)
     , DefaultMessage(std::move(defaultMessage))
+    , Id(httpStatusCode)
+{   
+    RegisteredCodes.insert(ErrorCode);
+}
+
+TErrorClass::TErrorClass(TString errorCode, ui32 httpStatusCode, TString defaultMessage, ui32 id)
+    : ErrorCode(std::move(errorCode))
+    , HttpStatusCode(httpStatusCode)
+    , DefaultMessage(std::move(defaultMessage))
+    , Id(id)
 {
     RegisteredCodes.insert(ErrorCode);
+    IdToErrorClass.insert_or_assign(id, this);
 }
 
 TSQSException::TSQSException(const TErrorClass& errorClass)
@@ -116,7 +128,8 @@ extern const TErrorClass SERVICE_UNAVAILABLE = {
 extern const TErrorClass THROTTLING_EXCEPTION = {
     "ThrottlingException",
     403,
-    "The request was denied due to request throttling."
+    "The request was denied due to request throttling.",
+    1
 };
 
 extern const TErrorClass VALIDATION_ERROR = {
@@ -158,7 +171,8 @@ extern const TErrorClass BATCH_REQUEST_TOO_LONG = {
 extern const TErrorClass NON_EXISTENT_QUEUE = {
     "AWS.SimpleQueueService.NonExistentQueue",
     400,
-    "The specified queue doesn't exist."
+    "The specified queue doesn't exist.",
+    2
 };
 
 extern const TErrorClass OVER_LIMIT = {

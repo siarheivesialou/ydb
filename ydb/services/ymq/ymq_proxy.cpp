@@ -49,10 +49,21 @@ namespace NKikimr::NYmq::V1 {
                 Cerr << "KLACK TYmqReplyCallback::TYmqReplyCallback()\n";
             }
             void DoSendReply(const NKikimrClient::TSqsResponse& resp) {
+                if (resp.GetGetQueueUrl().HasError()) {
+                    NYql::TIssue issue(resp.GetGetQueueUrl().GetError().GetErrorCode());
+                    issue.SetCode(3, NYql::ESeverity::TSeverityIds_ESeverityId_S_ERROR);
+                    issue.SetMessage(resp.GetGetQueueUrl().GetError().GetMessage());
+                    Cerr << "KLACK resp.GetGetQueueUrl().GetError().GetErrorCode() == " << resp.GetGetQueueUrl().GetError().GetErrorCode() << "  \n";
+                    Cerr << "KLACK resp.GetGetQueueUrl().GetError().GetMessage() == " << resp.GetGetQueueUrl().GetError().GetMessage() << "  \n";
+                    Cerr << "KLACK resp.GetGetQueueUrl().GetError().GetStatus() == " << resp.GetGetQueueUrl().GetError().GetStatus() << "  \n";
+                    Request->RaiseIssue(issue);
+                } else {
+                    Ydb::Ymq::V1::GetQueueUrlResult result;
+                    result.Setqueue_url(resp.GetGetQueueUrl().GetQueueUrl());
+                    Request->SendResult(result, Ydb::StatusIds::StatusCode::StatusIds_StatusCode_SUCCESS);
+                }
                 Cerr << "KLACK TYmqReplyCallback::DoSendReply(): " << resp.AsJSON() << "\n";
-                Ydb::Ymq::V1::GetQueueUrlResult result;
                 //TODO: возвращать правильный ответ
-                Request->SendResult(result, Ydb::StatusIds::StatusCode::StatusIds_StatusCode_SUCCESS);
             }
         private:
             std::shared_ptr<NKikimr::NGRpcService::IRequestOpCtx> Request;
